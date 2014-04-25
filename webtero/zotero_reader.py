@@ -1,5 +1,5 @@
 #!/usr/local/bin/python2.7
-# ==================================================================================================
+# ================================================================================================
 #
 #    Copyright (c) 2008, Patrick Janssen (patrick@janssen.name)
 #
@@ -18,7 +18,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with Webtero.  If not, see <http://www.gnu.org/licenses/>.
 #
-# ==================================================================================================
+# ================================================================================================
 """Allows websites to be automatically generated based on data in a Zotero database. 
 """
 
