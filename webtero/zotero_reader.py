@@ -85,44 +85,27 @@ class WebPageTab(object):
     def get_tab_content(self):
         """Returns the html content of the tab, i.e. the first note.
         """
-
-        if not self.html_contet:
-            return """
-            <div id="home">
-                <p>Under construction...</p>
+        # Get the html
+        main_text = None
+        for page in self.html_contet:
+            if 'main-text' in page.ztags:
+                main_text = page
+        # Create the template
+        template = """
+            <div id='{0}'>
+                <div class="text">
+                    {1}
+                </div>
+                <div class="toc">
+                     {2}
+                </div>
             </div>
             """
-        # Is this one column or two columns
-        one_column = None
-        two_columns = [None, None]
-        for page in self.html_contet:
-            if 'left-col' in page.ztags:
-                two_columns[0] = page
-            elif 'right-col' in page.ztags:
-                two_columns[1] = page
-            else:  # assume 'single-col'
-                one_column = page
-        if two_columns[0] and two_columns[1]:
-            if self.html_contet:
-                return """
-                <div id='{0}'>
-                    <div class="left-col">
-                        {1}
-                    </div>
-                    <div class="right-col">
-                         {2}
-                    </div>
-                </div>
-                """.format(self.html_id, two_columns[0].html, two_columns[1].html)
-        elif one_column:
-            if self.html_contet:
-                return """
-                <div id='{0}'>
-                    <div class="single-col">
-                        {1}
-                    </div>
-                </div>
-                """.format(self.html_id, one_column.html)
+        # Return the html text
+        if main_text:
+            return template.format(self.html_id, main_text.html, main_text.make_toc())
+        else:
+            return template.format(self.html_id, "Under construction...", "Under construction...")
 
     def __str__(self):
         return self.name
@@ -237,19 +220,30 @@ class HtmlContent(object):
         # print result
         # print items
         # Create an html string
-        html_string = ""
-        for i, item in enumerate(items):
-            # print "item in pubs"
-            if style == "conference_paper":
+        html_tag = None
+        if style == "conference_paper":
+            html_string = ""
+            for i, item in enumerate(items):
                 # print "make conf paper"
                 paper = ConferencePaper(str(i), item)
-                html_string += paper.get_list_item() + "\n\n"
-        # Create a new tag with html_string as content
-        print html_string
-        html_soup = BeautifulSoup(html_string)
-        new_tag = Tag(soup, 'ul')
-        new_tag.contents = html_soup  # ------------------------------------------------------- TODO
-        soup_pre.replaceWith(new_tag)
+                html_string += paper.get_list_item()
+            # Wrap in ul 
+            html_string = "<ul class='publications-list'>" + html_string + "</ul>"
+            html_soup = BeautifulSoup(html_string)
+            html_tag = html_soup.contents[0]
+        soup_pre.replaceWith(html_tag)
+
+    def make_toc(self):
+        return """<ul>
+            <li>Item 1</li>
+            <li>Item 2</li>
+            <li>Item 3</li>
+            <li>Thus us a long title, to see what happens 4</li>
+            <li>sdg</li>
+            <li>dfd  hhg</li>
+        </ul>
+        """
+
 
 
 class HtmlImage(object):
