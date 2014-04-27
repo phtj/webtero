@@ -23,11 +23,13 @@
 """
 
 from pyzotero import zotero
+from BeautifulSoup import BeautifulSoup
 import urllib
-
+import os
+from urlparse import urlparse
 
 class Attachment(object):
-    """Wraps the data for an attachment and has some methods for working with arttachments.
+    """Wraps the data for zotero attachment.
     """
     def __init__(self, group_reader, data):
         self.group_reader = group_reader
@@ -43,6 +45,80 @@ class Attachment(object):
         # cerate a url
         self.url = "https://api.zotero.org/groups/" + self.group_reader.group_id + \
             "/items/" + self.zid + "/file?key=" + self.group_reader.zot_key
+
+
+class Note(object):
+    """Wraps the data for a zotero note.
+    """
+    def __init__(self, group_reader, data):
+        self.group_reader = group_reader
+        self.zid = data[u'key'].encode('utf-8')
+        self.note = data[u'note'].encode('utf-8')
+        self.tags = data[u'tags']
+        self.img_srcs = []
+        self.process_tags()
+        print self.img_srcs
+
+    def process_tags(self):
+        """Process img tags in html and download missing images.
+        """
+        soup = BeautifulSoup(self.note)
+        for img in soup.findAll('img'):
+            self.replace_img_tags(soup, img)
+        for pre in soup.findAll('pre'):
+            self.replace_pre_tags(soup, pre)
+        self.note = str(soup)
+
+    def replace_img_tags(self, soup, img):
+        """Replace an img tag with a new one that points to a local image. If the img tag has no 
+        src, then remove the tag.
+        """
+        # get the src
+        if not img.has_key('src'):
+            img.extract()
+            return
+        url = img['src']
+        # see if the img has width or height
+        width = None
+        height = None
+        if img.has_key('width'):
+            width = img['width']
+        if img.has_key('height'):
+            height = img['height']
+        new_url = self.create_img_src(url, width, height)
+        img['src'] = new_url
+
+    def create_img_src(self, url, width=None, height=None):
+        """If the image does not ecist in the img folder, then copy the image. Also, the image may 
+        need to be resized.
+        """
+        parsed_url = urlparse(url)
+        netloc = parsed_url.netloc
+        path, basename = os.path.split(parsed_url.path)
+        img_name, img_ext = basename.split('.')
+        # create the image name
+        new_img_name = self.zid + "_" + img_name
+        if width:
+            new_img_name += "_w" + str(width)
+        if height:
+            new_img_name += "_h" + str(height)
+        new_img_src = "/img/" + new_img_name + ".jpg"
+        self.img_srcs.append(new_img_src)
+        """
+        new_img_loc = os.getcwd() + new_img_src
+        print new_img_loc
+        # see if this image exists, if not then create it
+        if not os.path.isfile(new_img_loc):
+            print "copy image"
+
+            img_data = self.group_reader.get_attachment()
+        return "test"
+        """
+
+    def replace_pre_tags(self, soup, pre):
+        """Process pre tags in html and execute the instructions.
+        """
+        pass
 
 
 class TabbedWebPage(object):
@@ -81,13 +157,10 @@ class WebPageTab(object):
         """
         for item in data:
             item_type = item[u'itemType'].encode('utf-8')
-            print item_type
             if item_type == 'note':
-                content = item[u'note'].encode('utf-8')
-                self.notes.append(content)
+                self.notes.append(Note(self.group_reader, item))
             elif item_type == 'attachment':
                 self.attachments.append(Attachment(self.group_reader, item))
-                print item
             elif item_type == "webpage":
                 pass
             elif item_type == "artwork":
@@ -297,7 +370,16 @@ class ZoteroGroupReader(object):
         coll_id = self.get_coll_id(coll_name)
         return self.group_conn.collections_sub(coll_id)
 
-
+    def get_attachment(self, item_id):
+        """Get the actual file attachment from zotero db.
+        """
+        url = "https://api.zotero.org/groups/"
+        url += self.group_id 
+        url += "/items/"
+        url += item_id
+        url += "/file?key="
+        url += self.zot_key
+        return urllib.retrieve(url)
 # ================================================================================================
 # Testing
 # ================================================================================================
