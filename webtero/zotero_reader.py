@@ -28,8 +28,95 @@ import urllib
 import os
 from urlparse import urlparse
 
-class Attachment(object):
-    """Wraps the data for zotero attachment.
+
+class TabbedWebPage(object):
+    """A web page with a list of tabs. The data for the web page is saved in one zotero collection, 
+    with each sub-collection representing a tab on teh web page. For each tab, an instance of 
+    WebPageTab is created.
+    """
+    def __init__(self, group_reader, coll_name):
+        self.group_reader = group_reader
+        self.tabs = []
+        tabs_data = self.group_reader.get_coll_subs(coll_name)
+        for data in tabs_data:
+            tab = WebPageTab(group_reader, data)
+            self.tabs.append(tab)
+        self.tabs.sort(key=lambda item: item.sort_key)
+
+
+class WebPageTab(object):
+    """A tab on a web page, consisting of html and images. In the zotero collection, the html is 
+    saved in notes, and images are saved as attachments.
+    """
+    def __init__(self, group_reader, data):
+        self.group_reader = group_reader
+        # Get the  name and id
+        coll_name = data[u'name'].encode('utf-8').split('_')
+        coll_id = data[u'collectionKey'].encode('utf-8')
+        if len(coll_name) != 2:
+            raise Exception()
+        # Set attributes
+        self.sort_key = int(coll_name[0])
+        self.name = coll_name[1]
+        self.html_id = coll_name[1].lower().replace(' ', '-')
+        self.notes = []
+        self.attachments = []
+        self.add_items(self.group_reader.get_coll_items_by_id(coll_id))
+
+    def add_items(self, data):
+        """Add items based on data from zotero. Currently only three types of items are considered
+        as being part of the web page: imagea are assumed to be attachments and artworks, and
+        html is assumed to be standalone notes.
+        """
+        # Get the attachments and artworks (which are also assumed to be images)
+        for item in data:
+            item_type = item[u'itemType'].encode('utf-8')
+            if item_type == 'attachment':
+                self.attachments.append(Attachment(self.group_reader, item))
+            elif item_type == "artwork":
+                pass
+
+        # Get the notes
+        for item in data:
+            item_type = item[u'itemType'].encode('utf-8')
+            if item_type == 'note':
+                self.notes.append(Note(self.group_reader, item))
+
+    def get_tab_button(self):
+        """Return the tab button, an <a> inside an <li>.
+        """
+        return """
+            <li>
+                <a href='#{0}'>{1}</a>
+            </li>""".format(self.html_id, self.name)
+
+    def get_tab_content(self):
+        """Returns the html content of the tab, i.e. the first note.
+        """
+        if len(self.notes):
+            return """
+            <div id='{0}'>
+                <div class="left-col">
+                    {1}
+                </div>
+                <div class="right-col">
+                    <p>Images go here</p>
+                </div>
+            </div>
+            """.format(self.html_id, self.notes[0])
+        else:
+            return """
+            <div id="home">
+                <p>Under construction...</p>
+            </div>
+            """
+
+    def __str__(self):
+        return self.name
+
+
+class ImageAttached(object):
+    """Wraps the data for zotero attachment that is assumed to be an image.
     """
     def __init__(self, group_reader, data):
         self.group_reader = group_reader
@@ -47,8 +134,8 @@ class Attachment(object):
             "/items/" + self.zid + "/file?key=" + self.group_reader.zot_key
 
 
-class Note(object):
-    """Wraps the data for a zotero note.
+class HtmlPage(object):
+    """Wraps the data for a zotero note that is assumed to be the html content of a page.
     """
     def __init__(self, group_reader, data):
         self.group_reader = group_reader
@@ -119,84 +206,6 @@ class Note(object):
         """Process pre tags in html and execute the instructions.
         """
         pass
-
-
-class TabbedWebPage(object):
-    """A web page with a list of tabs. Each tab is an instance of WebPageTab.
-    """
-    def __init__(self, group_reader, coll_name):
-        self.group_reader = group_reader
-        self.tabs = []
-        tabs_data = self.group_reader.get_coll_subs(coll_name)
-        for data in tabs_data:
-            tab = WebPageTab(group_reader, data)
-            self.tabs.append(tab)
-        self.tabs.sort(key=lambda item: item.sort_key)
-
-
-class WebPageTab(object):
-    """A tab on a web page.
-    """
-    def __init__(self, group_reader, data):
-        self.group_reader = group_reader
-        # Get the  name and id
-        coll_name = data[u'name'].encode('utf-8').split('_')
-        coll_id = data[u'collectionKey'].encode('utf-8')
-        if len(coll_name) != 2:
-            raise Exception()
-        # Set attributes
-        self.sort_key = int(coll_name[0])
-        self.name = coll_name[1]
-        self.html_id = coll_name[1].lower().replace(' ', '-')
-        self.notes = []
-        self.attachments = []
-        self.add_items(self.group_reader.get_coll_items_by_id(coll_id))
-
-    def add_items(self, data):
-        """Add items based on data from zotero.
-        """
-        for item in data:
-            item_type = item[u'itemType'].encode('utf-8')
-            if item_type == 'note':
-                self.notes.append(Note(self.group_reader, item))
-            elif item_type == 'attachment':
-                self.attachments.append(Attachment(self.group_reader, item))
-            elif item_type == "webpage":
-                pass
-            elif item_type == "artwork":
-                pass
-
-    def get_tab_button(self):
-        """Return the tab button, an <a> inside an <li>.
-        """
-        return """
-            <li>
-                <a href='#{0}'>{1}</a>
-            </li>""".format(self.html_id, self.name)
-
-    def get_tab_content(self):
-        """Returns the html content of the tab, i.e. the first note.
-        """
-        if len(self.notes):
-            return """
-            <div id='{0}'>
-                <div class="left-col">
-                    {1}
-                </div>
-                <div class="right-col">
-                    <p>Images go here</p>
-                </div>
-            </div>
-            """.format(self.html_id, self.notes[0])
-        else:
-            return """
-            <div id="home">
-                <p>Under construction...</p>
-            </div>
-            """
-
-    def __str__(self):
-        return self.name
 
 
 class Paper(object):
