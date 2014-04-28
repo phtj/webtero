@@ -299,7 +299,9 @@ class HtmlContent(object):
         headings = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
         toc_soup = BeautifulSoup()
         h2_tag = toc_soup.new_tag("h2")
-        h2_tag.string = "Contents"
+        a_tag = toc_soup.new_tag("a")
+        a_tag['href'] = "#top"
+        a_tag.string = "Contents"
         toc_soup.append(h2_tag)
         ul_tag = toc_soup.new_tag("ul")
         toc_soup.append(ul_tag)
