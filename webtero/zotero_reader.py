@@ -93,7 +93,7 @@ class WebPageTab(object):
         # Create the template
         template = """
             <div id='{0}'>
-                <div class="text">
+                <div class="main-text">
                     {1}
                 </div>
                 <div class="toc">
@@ -234,16 +234,20 @@ class HtmlContent(object):
         soup_pre.replaceWith(html_tag)
 
     def make_toc(self):
-        return """<ul>
-            <li>Item 1</li>
-            <li>Item 2</li>
-            <li>Item 3</li>
-            <li>Thus us a long title, to see what happens 4</li>
-            <li>sdg</li>
-            <li>dfd  hhg</li>
-        </ul>
+        """Creates a toc based on the headings, h1 to h6.
         """
-
+        # BeautifulSoup 3.2 code
+        soup = BeautifulSoup(self.html)
+        headings = soup.findAll(['h1','h2','h3','h4','h5','h6'])
+        toc_soup = BeautifulSoup()
+        ul_tag = Tag(toc_soup, "ul")
+        toc_soup.insert(0, ul_tag)
+        for heading in headings:
+            li_tag = Tag(toc_soup, "li")
+            li_tag.string = heading.string
+            li_tag['class'] = heading.name
+            toc_soup.ul.insert(len(toc_soup.ul), li_tag)
+        return str(toc_soup)
 
 
 class HtmlImage(object):
@@ -275,7 +279,7 @@ class HtmlImage(object):
         tmp_img = self.group_reader.get_attachment_file(self.zid)
         print tmp_img
         pil_img = Image.open(tmp_img)
-        # Resize the image
+        # Resize the image using PIL
         img_w, img_h = pil_img.size
         size_1 = (img_w, img_h)
         size_2 = (img_w, img_h)
@@ -287,9 +291,14 @@ class HtmlImage(object):
             size = size_2
         else:
             size = size_1
-        pil_img_resized = pil_img.resize(size, Image.ANTIALIAS)
-        # Save the image
-        pil_img_resized.save(img_path_filename, quality=100)
+        try:
+            # This might fail if the PIL binary module called _imaging could not be loaded.
+            pil_img_resized = pil_img.resize(size, Image.ANTIALIAS)
+            # Save the image
+            pil_img_resized.save(img_path_filename, quality=100)
+        except:
+            print "Problem with PIL. Images could not be resized."
+
 
 
 class Paper(object):
