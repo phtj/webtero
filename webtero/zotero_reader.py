@@ -23,12 +23,12 @@
 """
 
 from pyzotero import zotero
-from BeautifulSoup import BeautifulSoup, Tag
+from bs4 import BeautifulSoup, Tag
 import urllib
 import os
 from urlparse import urlparse
 from PIL import Image
-
+from string import Template
 
 class TabbedWebPage(object):
     """A web page with a list of tabs. The data for the web page is saved in one zotero collection,
@@ -37,6 +37,7 @@ class TabbedWebPage(object):
     """
     def __init__(self, group_reader, coll_name):
         self.group_reader = group_reader
+        self.coll_name = coll_name
         self.tabs = []
         tabs_data = self.group_reader.get_coll_subs(coll_name)
         for data in tabs_data:
@@ -44,6 +45,38 @@ class TabbedWebPage(object):
             self.tabs.append(tab)
         self.tabs.sort(key=lambda item: item.sort_key)
 
+    def get_buttons_html(self):
+        """Get an html string for the tab buttons. The html is encoded as utf-8.
+        """
+        return "".join([tab.get_tab_button() for tab in self.tabs])
+
+    def get_content_html(self):
+        """Get an html string for the content of all the tabs. The html is encoded as utf-8.
+        """
+        return "".join([tab.get_tab_content() for tab in self.tabs])
+
+    def get_html(self, template):
+        """Returns the full html for a web page with tabs. The template is a plain string, and
+        is expected to have three variables: $title, $tabs_buttons, $tabs_content. The html is
+        encoded as utf-8.
+        """
+        template = Template(template)
+        page_html = template.substitute(
+            title=self.coll_name,
+            tabs_buttons=self.get_buttons_html(),
+            tabs_content=self.get_content_html())
+        return page_html
+        # Seems to affect scrollbar so prettify disabeled for the moment
+        # soup = BeautifulSoup(page_html)
+        # soup = soup.prettify().encode('UTF-8')
+        # return str(soup)
+
+    def create_html_file(self, template, filename):
+        """Create an html file. Filename includes the full path to the file. The html is 
+        encoded as utf-8.
+        """
+        with open(filename, "w") as html_file:
+            html_file.write(self.get_html(template))
 
 class WebPageTab(object):
     """A tab on a web page, consisting of html and images. In the zotero collection, the html is
@@ -115,6 +148,9 @@ class HtmlContent(object):
     """An html page created from a zotero collection. The standalone notes in the collection are
     assumed to be the html content of a page. The attachments in the collection are assumed to be
     the images.
+
+    The list of missing images looks something like this:
+    [(img_zot_title, (img_loc, width, height), (img_loc, width, height)), ...]
     """
     def __init__(self, group_reader, coll_id, data):
         assert data[u'itemType'].encode('utf-8') == 'note'
@@ -130,39 +166,51 @@ class HtmlContent(object):
     def process_html_tags(self):
         """Process img tags in html and download missing images.
         """
-        # BeautifulSoup 3.2 code
+        # BeautifulSoup 4 code
         soup = BeautifulSoup(self.html)
-        for soup_img in soup.findAll('img'):
-            self.replace_img_src(soup_img)
-        for soup_pre in soup.findAll('pre'):
+        for soup_img in soup.find_all('img'):
+            self.replace_img(soup, soup_img)
+        for soup_pre in soup.find_all('pre'):
             self.replace_pre(soup, soup_pre)
+        for i, soup_h in enumerate(soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])):
+            soup_h['id'] = "head_" + str(i)
         self.html = str(soup)
 
-    def replace_img_src(self, soup_img):
+    def replace_img(self, soup, soup_img):
         """Replace an img tag with a new one that points to a local image. If the img tag has no
-        src, then remove the tag.
+        src, then remove the tag. Also, add a link and point to the big image.
         """
-        # BeautifulSoup 3.2 code
         # Get the src attribute and convert to str
         src = soup_img.get('src').encode('utf-8')
-        # Create the new src
-        parsed_url = urlparse(src)
-        _, img_filename = os.path.split(parsed_url.path)
-        soup_img['src'] = "img/" + img_filename
-        # Extract width and height from image name
-        self.discover_missing_images(img_filename)
+        # Go see if the images exist, if not add them to the missing list
+        sml_img_href, big_img_href = self.discover_missing_images(src)
+        # Create the new html nodes, an <a><img /></a>
+        soup_img['src'] = sml_img_href
+        a_tag = soup.new_tag('a')
+        a_tag['href'] = big_img_href
+        soup_img.wrap(a_tag)
 
-    def discover_missing_images(self, img_filename):
+    def discover_missing_images(self, src):
         """The name of the image may contain the required
         size constraints, for example 'my-image_w300_h200.png'. Underscores should only be used for
-        seperating width and height parameters, otherwise errors will occur. Return the new img src.
+        seperating width and height parameters, otherwise errors will occur. Return the new img
+        hrefs for the small and big versions of the image.
         """
+        image_details = []
+        # Get the filename
+        parsed_url = urlparse(src)
+        _, img_filename = os.path.split(parsed_url.path)
+        # Create the various names
         img_name, img_extension = img_filename.split('.')
-        # Check if the image file exists. If not, add this img to self.missing_images
-        img_loc = os.path.join(os.getcwd(), "img", img_filename)
-        if not os.path.isfile(img_loc):
+        name_parts = img_name.split('_')
+        big_img_filename = name_parts[0] + '_w1200_h1200.' + img_extension
+        img_zot_title = name_parts[0] + '.' + img_extension
+        sml_img_loc = os.path.join(os.getcwd(), 'img', img_filename)
+        big_img_loc = os.path.join(os.getcwd(), 'img', big_img_filename)
+        sml_img_href = 'img/' + img_filename
+        big_img_href = 'img/' + big_img_filename
+        if not os.path.isfile(sml_img_loc):
             # See if the name contains _w? or_h? which are the max width and max height
-            name_parts = img_name.split('_')
             width, height = None, None
             if len(name_parts) > 1:
                 if name_parts[1].startswith('h'):
@@ -174,9 +222,16 @@ class HtmlContent(object):
                     height = int(name_parts[2][1:])
                 elif name_parts[2].startswith('w'):
                     width = int(name_parts[2][1:])
-            # Create the zotero title for the image (i.e. the filename without the _w? and _h?)
-            img_zot_title = name_parts[0] + '.' + img_extension
-            self.missing_images.append((img_zot_title, img_loc, width, height))
+            image_details.append((sml_img_loc, width, height))
+        # Check if the big image exists.
+        big_img_loc = os.path.join(os.getcwd(), 'img', big_img_filename)
+        if not os.path.isfile(big_img_loc):
+            image_details.append((big_img_loc, 1200, 1200))
+        # Append the missing images to the list
+        if image_details:
+            self.missing_images.append((img_zot_title, image_details))
+        # Return the hrefs
+        return sml_img_href, big_img_href
 
     def get_images_from_zotero(self):
         """Tries to find the images in self.missing_images as attachments in the zotero collection
@@ -197,17 +252,20 @@ class HtmlContent(object):
             images[image.title] = image
         # For each img, try to find it in attachments
         for missing_img in self.missing_images:
-            img_zot_title, new_img_loc, width, height = missing_img
+            img_zot_title, image_details = missing_img
             if img_zot_title in images:
                 image = images[img_zot_title]
-                image.create_image_file(new_img_loc, width, height)
+                image.download_image()  # This way we only download the image once
+                for image_detail in image_details:
+                    img_loc, width, height = image_detail
+                    image.create_image_file(img_loc, width, height)
             else:
                 print "Could not find image: ", img_zot_title
 
     def replace_pre(self, soup, soup_pre):
         """Process pre tags in html and execute the instructions.
         """
-        # BeautifulSoup 3.2 code
+        # BeautifulSoup 4 code
         result = eval(soup_pre.string)
         group = result['group']
         coll = result['coll']
@@ -226,27 +284,33 @@ class HtmlContent(object):
             for i, item in enumerate(items):
                 # print "make conf paper"
                 paper = ConferencePaper(str(i), item)
-                html_string += paper.get_list_item()
-            # Wrap in ul 
+                html_string += paper.get_list_item()  #TODO: change to soup
+            # Wrap in ul
             html_string = "<ul class='publications-list'>" + html_string + "</ul>"
             html_soup = BeautifulSoup(html_string)
             html_tag = html_soup.contents[0]
-        soup_pre.replaceWith(html_tag)
+        soup_pre.replace_with(html_tag)
 
     def make_toc(self):
         """Creates a toc based on the headings, h1 to h6.
         """
-        # BeautifulSoup 3.2 code
+        # BeautifulSoup 4 code
         soup = BeautifulSoup(self.html)
-        headings = soup.findAll(['h1','h2','h3','h4','h5','h6'])
+        headings = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
         toc_soup = BeautifulSoup()
-        ul_tag = Tag(toc_soup, "ul")
-        toc_soup.insert(0, ul_tag)
+        h2_tag = toc_soup.new_tag("h2")
+        h2_tag.string = "Contents"
+        toc_soup.append(h2_tag)
+        ul_tag = toc_soup.new_tag("ul")
+        toc_soup.append(ul_tag)
         for heading in headings:
-            li_tag = Tag(toc_soup, "li")
-            li_tag.string = heading.string
+            li_tag = toc_soup.new_tag("li")
             li_tag['class'] = heading.name
-            toc_soup.ul.insert(len(toc_soup.ul), li_tag)
+            a_tag = toc_soup.new_tag("a")
+            a_tag.string = heading.string
+            a_tag['href'] = '#' + heading['id']
+            li_tag.append(a_tag)
+            ul_tag.append(li_tag)
         return str(toc_soup)
 
 
@@ -262,43 +326,53 @@ class HtmlImage(object):
         self.zid = data[u'key'].encode('utf-8')
         self.note = data[u'note'].encode('utf-8')
         self.title = data[u'title'].encode('utf-8')
-        self.filename = data[u'filename'].encode('utf-8')
-        # self.link_mode = data[u'linkMode'].encode('utf-8')
+        # The location where the temporary downloaded image is saved on disk
+        self.temp_img_filepath = None
         self.tags = data[u'tags']
-        # extract the tags
+        # The zotero tags
         if self.tags:
             self.tags = [tag.values()[0].encode('utf-8') for tag in self.tags]
         # cerate a url
         self.url = "https://api.zotero.org/groups/" + self.group_reader.group_id + \
             "/items/" + self.zid + "/file?key=" + self.group_reader.zot_key
 
-    def create_image_file(self, img_path_filename, width=None, height=None):
+    def download_image(self):
         """Downloads the image, resizes it, and saves it in the '/img' folder.
         """
         # Get the image
-        tmp_img = self.group_reader.get_attachment_file(self.zid)
-        print tmp_img
-        pil_img = Image.open(tmp_img)
+        self.temp_img_filepath = self.group_reader.get_attachment_file(self.zid)
+
+    def create_image_file(self, img_path_filename, width=None, height=None):
+        """Downloads the image, resizes it, and saves it in the '/img' folder.
+        """
+        # Check that the image has been downloaded
+        if not self.temp_img_filepath:
+            self.download_image()
+        # Get the image
+        pil_img = Image.open(self.temp_img_filepath)
         # Resize the image using PIL
         img_w, img_h = pil_img.size
         size_1 = (img_w, img_h)
         size_2 = (img_w, img_h)
-        if width:
+        if width and width < img_w:
             size_1 = (width, int((width/float(img_w)) * img_h))
-        if height:
+        if height and height < img_h:
             size_2 = (int((height/float(img_h)) * img_w), height)
         if size_1[0] > size_2[0]:
             size = size_2
         else:
             size = size_1
-        try:
-            # This might fail if the PIL binary module called _imaging could not be loaded.
-            pil_img_resized = pil_img.resize(size, Image.ANTIALIAS)
-            # Save the image
-            pil_img_resized.save(img_path_filename, quality=100)
-        except:
-            print "Problem with PIL. Images could not be resized."
-
+        # Save the image
+        if size != (img_w, img_h):
+            try:
+                # This might fail if the PIL binary module called _imaging could not be loaded.
+                pil_img_resized = pil_img.resize(size, Image.ANTIALIAS)
+                # Save the image
+                pil_img_resized.save(img_path_filename, quality=100)
+            except:
+                print "Problem with PIL. Images could not be resized."
+        else:
+            pil_img.save(img_path_filename, quality=100)
 
 
 class Paper(object):
@@ -343,7 +417,7 @@ class Paper(object):
         else:
             return "; ".join(self.authors[:-1]) + " and " + self.authors[-1]
 
-    def get_abstract_para(self):
+    def get_abstract_para(self):  # TODO: change to soup
         """Get the abstract wrapped in <p> and with an id.
         """
         return "<p class='abstract' id='"+self.uid+"'>" + self.abstract + "</p>"
@@ -368,7 +442,7 @@ class ConferencePaper(Paper):
         super(ConferencePaper, self).__init__(uid, data)
         self.conference = data[u'proceedingsTitle'].encode('utf-8')
 
-    def get_list_item(self):
+    def get_list_item(self):  # TODO: change to soup
         author_str = "<button class='toggle' target='#"+self.uid+"'>+</button>"
         author_str += "<p class=publication>"
         author_str += "<pa>" + self.get_authors() + "</pa> "
@@ -389,7 +463,7 @@ class JournalPaper(Paper):
         self.volume = data[u'volume'].encode('utf-8')
         self.issue = data[u'issue'].encode('utf-8')
 
-    def get_list_item(self):
+    def get_list_item(self):  # TODO: change to soup
         author_str = "<button class='toggle' target='#"+self.uid+"'>+</button>"
         author_str += "<p class=publication>"
         author_str += "<pa>" + self.get_authors() + "</pa> "
