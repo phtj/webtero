@@ -20,6 +20,13 @@
 #
 # ================================================================================================
 """Creates websites based on data in a Zotero collection.
+
+Many things TODO:
+- need to create some kind of simple logging
+- img_dir is not handeled well
+- when we create TabbedWebPage, it immediatley creates images. We should only do this when we call
+get_content_html method
+- when getting zot notes from the db for a tabbed web page, we should filter with tag 'main-text'
 """
 
 from pyzotero import zotero
@@ -38,10 +45,11 @@ class TabbedWebPage(object):
     def __init__(self, group_reader, coll_name):
         self.group_reader = group_reader
         self.coll_name = coll_name
+        self.img_dir = os.path.join(os.getcwd(), 'img')
         self.tabs = []
         tabs_data = self.group_reader.get_coll_subs(coll_name)
         for data in tabs_data:
-            tab = WebPageTab(group_reader, data)
+            tab = WebPageTab(group_reader, self.img_dir, data)
             self.tabs.append(tab)
         self.tabs.sort(key=lambda item: item.sort_key)
 
@@ -78,12 +86,21 @@ class TabbedWebPage(object):
         with open(filename, "w") as html_file:
             html_file.write(self.get_html(template))
 
+    def set_img_dir(self, img_dir):
+        """Set the folder where images in this website are saved on the local hard drive. Note that 
+        this depends on how the server is configured - it is not related to the href of the image.
+        """
+        self.img_dir = img_dir
+
+
 class WebPageTab(object):
     """A tab on a web page, consisting of html and images. In the zotero collection, the html is
     saved in notes, and images are saved as attachments.
     """
-    def __init__(self, group_reader, data):
+    def __init__(self, group_reader, img_dir, data):
         self.group_reader = group_reader
+        self.img_dir = img_dir
+
         self.coll_id = data[u'collectionKey'].encode('utf-8')
         # Get the name, which should be in the form "1_My Page"
         name_parts = data[u'name'].encode('utf-8').split('_')
@@ -105,7 +122,7 @@ class WebPageTab(object):
         notes = self.group_reader.get_coll_items_by_id(coll_id=self.coll_id, item_type="note")
         # Add the notes
         for note in notes:
-            self.html_contet.append(HtmlContent(self.group_reader, self.coll_id, note))
+            self.html_contet.append(HtmlContent(self.group_reader, self.coll_id, self.img_dir, note))
 
     def get_tab_button(self):
         """Return the tab button, an <a> inside an <li>.
@@ -152,10 +169,12 @@ class HtmlContent(object):
     The list of missing images looks something like this:
     [(img_zot_title, (img_loc, width, height), (img_loc, width, height)), ...]
     """
-    def __init__(self, group_reader, coll_id, data):
+    def __init__(self, group_reader, coll_id, img_dir, data):
         assert data[u'itemType'].encode('utf-8') == 'note'
         self.group_reader = group_reader
         self.coll_id = coll_id  # This is the parent of this note
+        self.img_dir = img_dir
+
         self.zid = data[u'key'].encode('utf-8')
         self.ztags = [i.values()[0].encode('utf-8') for i in data[u'tags']]
         self.html = data[u'note'].encode('utf-8')
@@ -205,8 +224,8 @@ class HtmlContent(object):
         name_parts = img_name.split('_')
         big_img_filename = name_parts[0] + '_w1200_h1200.' + img_extension
         img_zot_title = name_parts[0] + '.' + img_extension
-        sml_img_loc = os.path.join(os.getcwd(), 'img', img_filename)
-        big_img_loc = os.path.join(os.getcwd(), 'img', big_img_filename)
+        sml_img_loc = os.path.join(self.img_dir, img_filename)
+        big_img_loc = os.path.join(self.img_dir, big_img_filename)
         sml_img_href = 'img/' + img_filename
         big_img_href = 'img/' + big_img_filename
         if not os.path.isfile(sml_img_loc):
@@ -224,7 +243,6 @@ class HtmlContent(object):
                     width = int(name_parts[2][1:])
             image_details.append((sml_img_loc, width, height))
         # Check if the big image exists.
-        big_img_loc = os.path.join(os.getcwd(), 'img', big_img_filename)
         if not os.path.isfile(big_img_loc):
             image_details.append((big_img_loc, 1200, 1200))
         # Append the missing images to the list
