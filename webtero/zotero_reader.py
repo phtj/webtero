@@ -22,11 +22,10 @@
 """Creates websites based on data in a Zotero collection.
 
 Many things TODO:
-- need to create some kind of simple logging
-- img_dir is not handeled well
-- when we create TabbedWebPage, it immediatley creates images. We should only do this when we call
-get_content_html method
 - when getting zot notes from the db for a tabbed web page, we should filter with tag 'main-text'
+- at the moment, it is creating html content for all tabs it finds. maybe only the first is 
+necessary
+- the info_str should be a nested list
 """
 
 from pyzotero import zotero
@@ -37,7 +36,7 @@ from urlparse import urlparse
 from PIL import Image
 from string import Template
 
-class TabbedWebPage(object):
+class TabbedWebsite(object):
     """A web page with a list of tabs. The data for the web page is saved in one zotero collection,
     with each sub-collection representing a tab on the web page. For each tab, an instance of
     WebPageTab is created.
@@ -47,32 +46,52 @@ class TabbedWebPage(object):
         self.coll_name = coll_name
         self.img_dir = os.path.join(os.getcwd(), 'img')
         self.tabs = []
-        tabs_data = self.group_reader.get_coll_subs(coll_name)
+
+    def initialize_data(self, img_dir=None):
+        """Get the data from the zotero database.
+        """
+        info_str = "Initializing data for the " + self.coll_name + " website.\n"
+        if img_dir:
+            self.img_dir = img_dir
+            info_str += "Updated the image dir to " + img_dir + "\n"
+        try:
+            info_str += "Getting data for sub-collections for collection '" \
+                + self.coll_name + "'.\n"
+            tabs_data = self.group_reader.get_coll_subs(self.coll_name)
+        except:
+            info_str += "ERROR: could not get sub-collections for collection '" \
+                + self.coll_name + "'.\n"
+            return info_str
         for data in tabs_data:
-            tab = WebPageTab(group_reader, self.img_dir, data)
+            tab = WebPageTab(self, data)
+            info_str += tab.initialize_data()
             self.tabs.append(tab)
         self.tabs.sort(key=lambda item: item.sort_key)
+        return info_str
 
-    def get_buttons_html(self):
+    def _get_buttons_html(self):
         """Get an html string for the tab buttons. The html is encoded as utf-8.
+        Make sure _initialize_data() has been called first.
         """
         return "".join([tab.get_tab_button() for tab in self.tabs])
 
-    def get_content_html(self):
+    def _get_content_html(self):
         """Get an html string for the content of all the tabs. The html is encoded as utf-8.
+        Make sure _initialize_data() has been called first.
         """
         return "".join([tab.get_tab_content() for tab in self.tabs])
 
-    def get_html(self, template):
+    def _get_html(self, template):
         """Returns the full html for a web page with tabs. The template is a plain string, and
         is expected to have three variables: $title, $tabs_buttons, $tabs_content. The html is
         encoded as utf-8.
+        Make sure _initialize_data() has been called first.
         """
         template = Template(template)
         page_html = template.substitute(
             title=self.coll_name,
-            tabs_buttons=self.get_buttons_html(),
-            tabs_content=self.get_content_html())
+            tabs_buttons=self._get_buttons_html(),
+            tabs_content=self._get_content_html())
         return page_html
         # Seems to affect scrollbar so prettify disabeled for the moment
         # soup = BeautifulSoup(page_html)
@@ -80,49 +99,57 @@ class TabbedWebPage(object):
         # return str(soup)
 
     def create_html_file(self, template, filename):
-        """Create an html file. Filename includes the full path to the file. The html is 
+        """Create an html file. Filename includes the full path to the file. The html is
         encoded as utf-8.
         """
-        with open(filename, "w") as html_file:
-            html_file.write(self.get_html(template))
-
-    def set_img_dir(self, img_dir):
-        """Set the folder where images in this website are saved on the local hard drive. Note that 
-        this depends on how the server is configured - it is not related to the href of the image.
-        """
-        self.img_dir = img_dir
-
+        info_str = "Writing html file to disk: " + filename + "\n"
+        try:
+            with open(filename, "w") as html_file:
+                html_file.write(self._get_html(template))
+        except:
+            info_str += "ERROR: could not write html file to disk. Maybe the path is wrong.\n"
+        return info_str
 
 class WebPageTab(object):
     """A tab on a web page, consisting of html and images. In the zotero collection, the html is
     saved in notes, and images are saved as attachments.
     """
-    def __init__(self, group_reader, img_dir, data):
-        self.group_reader = group_reader
-        self.img_dir = img_dir
-
+    def __init__(self, tabbed_website, data):
+        # The parent
+        self.tabbed_website = tabbed_website
+        # The data
         self.coll_id = data[u'collectionKey'].encode('utf-8')
-        # Get the name, which should be in the form "1_My Page"
-        name_parts = data[u'name'].encode('utf-8').split('_')
+        name_parts = data[u'name'].encode('utf-8').split('_')  # e.g. "1_My Page"
         assert len(name_parts) == 2
         # Set attributes
         self.sort_key = int(name_parts[0])
         self.name = name_parts[1]
         self.html_id = name_parts[1].lower().replace(' ', '-')
         self.html_contet = []
-        # Get notes from zotero and add to html_contet
-        self.add_html_pages()
 
-    def add_html_pages(self):
+    def initialize_data(self):
         """Add items based on data from zotero. Currently only three types of items are considered
         as being part of the web page: imagea are assumed to be attachments and artworks, and
         html is assumed to be standalone notes.
         """
         # Get the notes
-        notes = self.group_reader.get_coll_items_by_id(coll_id=self.coll_id, item_type="note")
+        info_str = "Initializing data for '" + self.name + "' tab.\n"
+        group_reader = self.tabbed_website.group_reader
+        try:
+            notes = group_reader.get_coll_items_by_id(coll_id=self.coll_id, item_type="note")
+            info_str += "Found " + str(len(notes)) + " notes in the zotero database.\n"
+        except:
+            info_str += "ERROR: Failed to get data from the zotero database.\n"
+            return
         # Add the notes
         for note in notes:
-            self.html_contet.append(HtmlContent(self.group_reader, self.coll_id, self.img_dir, note))
+            info_str += "Creating HTML content from note.\n"
+            try:
+                self.html_contet.append(HtmlContent(self.tabbed_website, self, note))
+            except:
+                info_str += "Error: Failed to create HTML content from note.\n"
+        # Return the info
+        return info_str
 
     def get_tab_button(self):
         """Return the tab button, an <a> inside an <li>.
@@ -169,12 +196,12 @@ class HtmlContent(object):
     The list of missing images looks something like this:
     [(img_zot_title, (img_loc, width, height), (img_loc, width, height)), ...]
     """
-    def __init__(self, group_reader, coll_id, img_dir, data):
+    def __init__(self, tabbed_website, web_page_tab, data):
         assert data[u'itemType'].encode('utf-8') == 'note'
-        self.group_reader = group_reader
-        self.coll_id = coll_id  # This is the parent of this note
-        self.img_dir = img_dir
-
+        # The parent objects
+        self.tabbed_website = tabbed_website
+        self.web_page_tab = web_page_tab
+        # The data
         self.zid = data[u'key'].encode('utf-8')
         self.ztags = [i.values()[0].encode('utf-8') for i in data[u'tags']]
         self.html = data[u'note'].encode('utf-8')
@@ -224,8 +251,9 @@ class HtmlContent(object):
         name_parts = img_name.split('_')
         big_img_filename = name_parts[0] + '_w1200_h1200.' + img_extension
         img_zot_title = name_parts[0] + '.' + img_extension
-        sml_img_loc = os.path.join(self.img_dir, img_filename)
-        big_img_loc = os.path.join(self.img_dir, big_img_filename)
+        img_dir = self.tabbed_website.img_dir
+        sml_img_loc = os.path.join(img_dir, img_filename)
+        big_img_loc = os.path.join(img_dir, big_img_filename)
         sml_img_href = 'img/' + img_filename
         big_img_href = 'img/' + big_img_filename
         if not os.path.isfile(sml_img_loc):
@@ -259,14 +287,16 @@ class HtmlContent(object):
         # Check we have some missing images
         if not self.missing_images:
             return
+        # Get the reader and coll id from the parents
+        group_reader = self.tabbed_website.group_reader
+        coll_id = self.web_page_tab.coll_id
         # Get all attachments
-        attachments = self.group_reader.get_coll_items_by_id(
-            coll_id=self.coll_id, item_type="attachment")
+        attachments = group_reader.get_coll_items_by_id(coll_id=coll_id, item_type="attachment")
         # Creat a dict to store images
         images = {}
         # Create the Image objects
         for attachment in attachments:
-            image = HtmlImage(self.group_reader, self.coll_id, attachment)
+            image = HtmlImage(group_reader, coll_id, attachment)
             images[image.title] = image
         # For each img, try to find it in attachments
         for missing_img in self.missing_images:
@@ -285,28 +315,39 @@ class HtmlContent(object):
         """
         # BeautifulSoup 4 code
         result = eval(soup_pre.string)
-        group = result['group']
+        group_name = result['group']
         coll = result['coll']
         item_type = result['item_type']
         tag = result['tag']
         style = result['style']
         # Create a reader and download data
-        reader = ZoteroGroupReader(self.group_reader.zot_id, self.group_reader.zot_key, group)
-        items = reader.get_coll_items_by_name(coll, item_type, tag)
-        # print result
-        # print items
+        zot_id = self.tabbed_website.group_reader.zot_id
+        zot_key = self.tabbed_website.group_reader.zot_key
+        data_group_reader = ZoteroGroupReader(zot_id, zot_key)
+        info_str = data_group_reader.initialize_conn_group_name(group_name)
+        items = data_group_reader.get_coll_items_by_name(coll, item_type, tag)
         # Create an html string
         html_tag = None
         if style == "conference_paper":
             html_string = ""
             for i, item in enumerate(items):
-                # print "make conf paper"
                 paper = ConferencePaper(str(i), item)
                 html_string += paper.get_list_item()  #TODO: change to soup
             # Wrap in ul
             html_string = "<ul class='publications-list'>" + html_string + "</ul>"
             html_soup = BeautifulSoup(html_string)
             html_tag = html_soup.contents[0]
+        elif style == "journal_paper":
+            html_string = ""
+            for i, item in enumerate(items):
+                paper = JournalPaper(str(i), item)
+                html_string += paper.get_list_item()  #TODO: change to soup
+            # Wrap in ul
+            html_string = "<ul class='publications-list'>" + html_string + "</ul>"
+            html_soup = BeautifulSoup(html_string)
+            html_tag = html_soup.contents[0]
+        else:
+            raise Exception()
         soup_pre.replace_with(html_tag)
 
     def make_toc(self):
@@ -406,14 +447,12 @@ class Paper(object):
         self.pages = data[u'pages'].encode('utf-8')
         self.abstract = data[u'abstractNote'].encode('utf-8')
         self.set_authors(data)
-        # print data
 
     def check_keys(self, dictionary, keys):
         """ Check that the dict contains the list of keys.
         """
         for k in keys:
             if k not in dictionary.keys():
-                print "Missing key: ", k
                 return False
         return True
 
@@ -503,42 +542,74 @@ class ZoteroGroupReader(object):
     """ Reads a group in zotero database.
     """
 
-    def __init__(self, zot_id, zot_key, group_name):
+    def __init__(self, zot_id, zot_key):
         """Make the connection to a group.
         """
         # Login
         self.zot_id = zot_id
         self.zot_key = zot_key
-        # Get the groups
-        user_connection = zotero.Zotero(zot_id, 'user', zot_key)
-        if not user_connection:
-            print "Cannot connect"
-            raise Exception()
-        groups = user_connection.groups()
+        self.group_name = None
         self.group_id = None
+        self.group_conn = None
+
+    def initialize_conn_group_name(self, group_name):
+        """Tries to create a connection with the zotero database.
+        """
+        info_str = "Creating connection with zotero database using user id.\n"
+        self.group_name = group_name
+        # Get the groups
+        user_connection = zotero.Zotero(self.zot_id, 'user', self.zot_key)
+        if not user_connection:
+            info_str += "ERROR: Cannot connect to zotero user level database.\n"
+            return info_str
+        groups = user_connection.groups()
+        # Find the right group
+        group_id = None
         for group in groups:
             if group[u'name'] == group_name:
-                self.group_id = group[u'group_id']
-        if not self.group_id:
-            print "Can not find group '", group_name, "'\n\n"
-            raise Exception()
-        # Get the data from the group
-        group_conn = zotero.Zotero(self.group_id, 'group', zot_key)
-        self.group_conn = group_conn
+                group_id = group[u'group_id']
+        if not group_id:
+            info_str += "Can not find group '", group_name, "'\n"
+            return info_str
+        # Create a connection to that group
+        info_str += self.initialize_conn_group_id(group_id)
+        # Return the info
+        return info_str
+
+    def initialize_conn_group_id(self, group_id):
+        """Tries to create a connection with the zotero database.
+        """
+        info_str = "Creating connection with zotero database using group id.\n"
+        self.group_id = group_id
+        # Create a connection to that group
+        self.group_conn = zotero.Zotero(group_id, 'group', self.zot_key)
+        if not self.group_conn:
+            info_str += "ERROR: Cannot connect to zotero group level database.\n"
+        # Return the info
+        return info_str
+
+    def get_group_items(self):
+        """Return all items in this group
+        """
+        return self.group_conn.items()
+
+    def get_group_colls(self):
+        """Return all collections in this group
+        """
+        return self.group_conn.collections()
 
     def get_coll_id(self, coll_name):
-        """Return the ID of a collection.
+        """Return the ID of a collection. If the name does not exist, raise an exception.
         """
         for coll in self.group_conn.collections():
             if coll[u'name'] == coll_name:
                 return coll[u'collectionKey']
-        print "Can not find collection '", coll_name, "'\n\n"
         raise Exception()
 
     def get_coll_items_by_name(self, coll_name, item_type=None, tag=None):
         """Return the items in a collection, giving the name of the collection.
 
-        item_type can be Note, Attachment, ConferencePaper
+        item_type can be Note, Attachment, ConferencePaper, JournalArticle, etc
         """
         coll_id = self.get_coll_id(coll_name)
         return self.get_coll_items_by_id(coll_id, item_type, tag)
@@ -589,18 +660,36 @@ class ZoteroGroupReader(object):
 # Testing
 # ================================================================================================
 
-ZOT_ID = "xxx"
-ZOT_KEY = "xxx"
-
-
 def test_tabs():
-    """Simple test for tabs"
+    """Simple test for tabs.
+    You need to make sure there is a sub-folder called "test".
     """
-    print "Start testing..."
-    group_reader = ZoteroGroupReader(ZOT_ID, ZOT_KEY, "Patrick Janssen Software")
-    TabbedWebPage(group_reader, "Web_Dexen")
-    print "Stop testing..."
+    print "Starting..."
+    from zotero_auth import ZOT_ID, ZOT_KEY
+    import templates
+    CURR_DIR = os.path.dirname(os.path.abspath(__file__))
+    group_reader = ZoteroGroupReader(ZOT_ID, ZOT_KEY)
+    print group_reader.initialize_conn_group_name("Patrick Janssen Websites")
+    twp = TabbedWebsite(group_reader, "Dexen2")
+    print twp.initialize_data(CURR_DIR + '/test')
+    print twp.create_html_file(templates.HTML_TEMPLATE, CURR_DIR + "/test/index.html")
+    print "Finished..."
 
+def test_get_data():
+    """Simple test for getting data from zotero.
+    """
+    print "Starting..."
+    from zotero_auth import ZOT_ID, ZOT_KEY
+    group_reader = ZoteroGroupReader(ZOT_ID, ZOT_KEY)
+    print group_reader.initialize_conn_group_name("Patrick Janssen Websites")
+    print "\nITEMS\n"
+    for item in group_reader.get_group_items():
+        print item, '\n'
+    print "\nCOLLECTIONS\n"
+    for coll in group_reader.get_group_colls():
+        print coll, '\n'
+
+    #print group_reader.get_coll_subs("Eddex")
 
 if __name__ == "__main__":
     print "Running tests"

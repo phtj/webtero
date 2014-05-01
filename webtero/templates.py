@@ -17,12 +17,13 @@ HTML_TEMPLATE = """
     <div id="content">
         <select id="website-selector">
             <option value="http://www.patrick.janssen.name">Patrick Janssen</option>
-            <option value="http://students.patrick.janssen.name">Teaching: Urban Reboot</option>
+            <option value="http://lab.patrick.janssen.name/">Research: Design Automation Lab</option>
+            <option value="http://students.patrick.janssen.name">Teaching: Urban Reboot Studio</option>
             <option value="http://eddex.evo-devo-design.net">Software: Eddex</option>
             <option value="http://houdarcs.evo-devo-design.net">Software: Houdarcs</option>
             <option value="http://vidamo.evo-devo-design.net">Software: Vidamo</option>
-            <option value="http://dexen.org">Software: Dexen</option>
-            <!-- <option value="http://design-automation.net/">Consultancy: Design Automation</option> -->
+            <option value="http://dexen.evo-devo-design.net">Software: Dexen</option>
+
         </select>
         <div id="header"><h1>$title</h1></div>
             <div id="tabs-area">
@@ -35,7 +36,7 @@ HTML_TEMPLATE = """
                         $tabs_content
                     </div> <!-- tabs-content -->
             </div> <!-- tabs-area -->
-        <div id="footer">Patrick Janssen (c) 2008 <a href='http://www.zotero.org/groups/patrick_janssen'>Auto-generated from Zotero database.</a></div>
+        <div id="footer"><a href='http://webtero.evo-devo-design.net/'>Auto-generated from Zotero database. </a> Patrick Janssen (c) 2008</div>
     </div> <!-- content -->
 </body>
 </html>
