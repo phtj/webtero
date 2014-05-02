@@ -227,18 +227,18 @@ class HtmlContent(object):
     def process_html_tags(self):
         """Process img tags in html and download missing images.
         """
-        info_str = "Looking for <img>,  <pre>, and <h?>.\n"
+        info_str = "Looking for \<img\>,  \<pre\>, and \<h?\>.\n"
         # BeautifulSoup 4 code
         soup = BeautifulSoup(self.html)
         for soup_img in soup.find_all('img'):
             self.replace_img(soup, soup_img)
-            info_str += "Found <img>.\n"
+            info_str += "Found \<img\>.\n"
         for soup_pre in soup.find_all('pre'):
             self.replace_pre(soup, soup_pre)
-            info_str += "Found <img>.\n"
+            info_str += "Found \<img\>.\n"
         for i, soup_h in enumerate(soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])):
             soup_h['id'] = "head_" + str(i)
-            info_str += "Found <h?>.\n"
+            info_str += "Found \<h?\>.\n"
         self.html = str(soup)
         return info_str
 
@@ -358,18 +358,26 @@ class HtmlContent(object):
         # Create an html string
         html_tag = None
         if style == "conference_paper":
-            html_string = ""
+            papers = []
             for i, item in enumerate(items):
                 paper = ConferencePaper(str(i), item)
+                papers.append(paper)
+            papers.sort(key=lambda paper: paper.year, reverse=True)
+            html_string = ""
+            for paper in papers:
                 html_string += paper.get_list_item()  #TODO: change to soup
             # Wrap in ul
             html_string = "<ul class='publications-list'>" + html_string + "</ul>"
             html_soup = BeautifulSoup(html_string)
             html_tag = html_soup.contents[0]
         elif style == "journal_paper":
-            html_string = ""
+            papers = []
             for i, item in enumerate(items):
                 paper = JournalPaper(str(i), item)
+                papers.append(paper)
+            papers.sort(key=lambda paper: paper.year, reverse=True)
+            html_string = ""
+            for paper in papers:
                 html_string += paper.get_list_item()  #TODO: change to soup
             # Wrap in ul
             html_string = "<ul class='publications-list'>" + html_string + "</ul>"
