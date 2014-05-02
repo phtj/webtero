@@ -318,8 +318,13 @@ class HtmlContent(object):
         group_name = result['group']
         coll = result['coll']
         item_type = result['item_type']
-        tag = result['tag']
         style = result['style']
+        # Check if there is a tag
+        tag = ""
+        if result.has_key('tag'):
+            tag = result['tag']
+        if not tag:
+            tag = None
         # Create a reader and download data
         zot_id = self.tabbed_website.group_reader.zot_id
         zot_key = self.tabbed_website.group_reader.zot_key
