@@ -35,6 +35,7 @@ import os
 from urlparse import urlparse
 from PIL import Image
 from string import Template
+import traceback
 
 class TabbedWebsite(object):
     """A web page with a list of tabs. The data for the web page is saved in one zotero collection,
@@ -125,7 +126,7 @@ class WebPageTab(object):
         self.sort_key = int(name_parts[0])
         self.name = name_parts[1]
         self.html_id = name_parts[1].lower().replace(' ', '-')
-        self.html_contet = []
+        self.html_content = []
 
     def initialize_data(self):
         """Add items based on data from zotero. Currently only three types of items are considered
@@ -145,9 +146,12 @@ class WebPageTab(object):
         for note in notes:
             info_str += "Creating HTML content from note.\n"
             try:
-                self.html_contet.append(HtmlContent(self.tabbed_website, self, note))
-            except:
+                html_content = HtmlContent(self.tabbed_website, self, note)
+                info_str += html_content.initialize_data()
+                self.html_content.append(html_content)
+            except Exception, e:
                 info_str += "Error: Failed to create HTML content from note.\n"
+                info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
         # Return the info
         return info_str
 
@@ -160,13 +164,18 @@ class WebPageTab(object):
             </li>""".format(self.html_id, self.name)
 
     def get_tab_content(self):
-        """Returns the html content of the tab, i.e. the first note.
+        """Returns the html content of the tab, i.e. the note. If there is only one note, then the 
+        content is assumed to be that note. if there is more than one note, then then one of the
+        notes must have the 'main-text' tag.
         """
         # Get the html
         main_text = None
-        for page in self.html_contet:
-            if 'main-text' in page.ztags:
-                main_text = page
+        if len(self.html_content) == 1:
+            main_text = self.html_content[0]
+        else:
+            for page in self.html_content:
+                if 'main-text' in page.ztags:
+                    main_text = page
         # Create the template
         template = """
             <div id='{0}'>
@@ -206,21 +215,32 @@ class HtmlContent(object):
         self.ztags = [i.values()[0].encode('utf-8') for i in data[u'tags']]
         self.html = data[u'note'].encode('utf-8')
         self.missing_images = []
-        self.process_html_tags()
-        self.get_images_from_zotero()
+
+    def initialize_data(self):
+        """Get images and replace <img> and <pre> tags.
+        """
+        info_str = "Initializing data for html content.\n"
+        info_str += self.process_html_tags()
+        info_str += self.get_images_from_zotero()
+        return info_str
 
     def process_html_tags(self):
         """Process img tags in html and download missing images.
         """
+        info_str = "Looking for <img>,  <pre>, and <h?>.\n"
         # BeautifulSoup 4 code
         soup = BeautifulSoup(self.html)
         for soup_img in soup.find_all('img'):
             self.replace_img(soup, soup_img)
+            info_str += "Found <img>.\n"
         for soup_pre in soup.find_all('pre'):
             self.replace_pre(soup, soup_pre)
+            info_str += "Found <img>.\n"
         for i, soup_h in enumerate(soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])):
             soup_h['id'] = "head_" + str(i)
+            info_str += "Found <h?>.\n"
         self.html = str(soup)
+        return info_str
 
     def replace_img(self, soup, soup_img):
         """Replace an img tag with a new one that points to a local image. If the img tag has no
@@ -284,9 +304,11 @@ class HtmlContent(object):
         for this page. If the attachment is found, it then downloads the attachment, resizes it
         with PIL, and the saves the image to the img folder.
         """
+        info_str = "Getting images from zotero.\n"
         # Check we have some missing images
         if not self.missing_images:
-            return
+            info_str += "No missing images were found.\n"
+            return info_str
         # Get the reader and coll id from the parents
         group_reader = self.tabbed_website.group_reader
         coll_id = self.web_page_tab.coll_id
@@ -300,6 +322,7 @@ class HtmlContent(object):
             images[image.title] = image
         # For each img, try to find it in attachments
         for missing_img in self.missing_images:
+            info_str += "Getting missing image: " + str(missing_img) + ".\n"
             img_zot_title, image_details = missing_img
             if img_zot_title in images:
                 image = images[img_zot_title]
@@ -309,6 +332,7 @@ class HtmlContent(object):
                     image.create_image_file(img_loc, width, height)
             else:
                 print "Could not find image: ", img_zot_title
+        return info_str
 
     def replace_pre(self, soup, soup_pre):
         """Process pre tags in html and execute the instructions.
@@ -675,7 +699,7 @@ def test_tabs():
     CURR_DIR = os.path.dirname(os.path.abspath(__file__))
     group_reader = ZoteroGroupReader(ZOT_ID, ZOT_KEY)
     print group_reader.initialize_conn_group_name("Patrick Janssen Websites")
-    twp = TabbedWebsite(group_reader, "Dexen2")
+    twp = TabbedWebsite(group_reader, "Patrick Janssen")
     print twp.initialize_data(CURR_DIR + '/test')
     print twp.create_html_file(templates.HTML_TEMPLATE, CURR_DIR + "/test/index.html")
     print "Finished..."
