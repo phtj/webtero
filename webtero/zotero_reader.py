@@ -59,9 +59,10 @@ class TabbedWebsite(object):
             info_str += "Getting data for sub-collections for collection '" \
                 + self.coll_name + "'.\n"
             tabs_data = self.group_reader.get_coll_subs(self.coll_name)
-        except:
+        except Exception:
             info_str += "ERROR: could not get sub-collections for collection '" \
                 + self.coll_name + "'.\n"
+            info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
             return info_str
         for data in tabs_data:
             tab = WebPageTab(self, data)
@@ -107,8 +108,9 @@ class TabbedWebsite(object):
         try:
             with open(filename, "w") as html_file:
                 html_file.write(self._get_html(template))
-        except:
+        except Exception:
             info_str += "ERROR: could not write html file to disk. Maybe the path is wrong.\n"
+            info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
         return info_str
 
 class WebPageTab(object):
@@ -139,8 +141,9 @@ class WebPageTab(object):
         try:
             notes = group_reader.get_coll_items_by_id(coll_id=self.coll_id, item_type="note")
             info_str += "Found " + str(len(notes)) + " notes in the zotero database.\n"
-        except:
+        except Exception:
             info_str += "ERROR: Failed to get data from the zotero database.\n"
+            info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
             return
         # Add the notes
         for note in notes:
@@ -149,7 +152,7 @@ class WebPageTab(object):
                 html_content = HtmlContent(self.tabbed_website, self, note)
                 info_str += html_content.initialize_data()
                 self.html_content.append(html_content)
-            except Exception, e:
+            except Exception:
                 info_str += "Error: Failed to create HTML content from note.\n"
                 info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
         # Return the info
@@ -214,6 +217,7 @@ class HtmlContent(object):
         self.zid = data[u'key'].encode('utf-8')
         self.ztags = [i.values()[0].encode('utf-8') for i in data[u'tags']]
         self.html = data[u'note'].encode('utf-8')
+        self.images = {}
         self.missing_images = []
 
     def initialize_data(self):
@@ -221,24 +225,25 @@ class HtmlContent(object):
         """
         info_str = "Initializing data for html content.\n"
         info_str += self.process_html_tags()
+        info_str += self.get_attachments_from_zotero()        
         info_str += self.get_images_from_zotero()
         return info_str
 
     def process_html_tags(self):
         """Process img tags in html and download missing images.
         """
-        info_str = "Looking for \<img\>,  \<pre\>, and \<h?\>.\n"
+        info_str = "Looking for img,  pre, and h? tags.\n"
         # BeautifulSoup 4 code
         soup = BeautifulSoup(self.html)
         for soup_img in soup.find_all('img'):
             self.replace_img(soup, soup_img)
-            info_str += "Found \<img\>.\n"
+            info_str += "Found img tag.\n"
         for soup_pre in soup.find_all('pre'):
             self.replace_pre(soup, soup_pre)
-            info_str += "Found \<img\>.\n"
+            info_str += "Found pre tag.\n"
         for i, soup_h in enumerate(soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])):
             soup_h['id'] = "head_" + str(i)
-            info_str += "Found \<h?\>.\n"
+            info_str += "Found h? tag.\n"
         self.html = str(soup)
         return info_str
 
@@ -299,6 +304,28 @@ class HtmlContent(object):
         # Return the hrefs
         return sml_img_href, big_img_href
 
+    def get_attachments_from_zotero(self):
+        """Gets all the attachments, and assumes they are all images.
+        """
+        info_str = "Getting image attachments from zotero.\n"
+        # Get the reader and coll id from the parents
+        group_reader = self.tabbed_website.group_reader
+        coll_id = self.web_page_tab.coll_id
+        # Get all attachments
+        try:
+            attachments = group_reader.get_coll_items_by_id(coll_id=coll_id, item_type="attachment")
+        except Exception:
+            info_str = "ERROR: something went wrong when getting image attachments.\n"
+            info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
+            return info_str
+        # Create the Image objects
+        for attachment in attachments:
+            info_str = "Found attachment: " + image.title + ".\n"
+            image = HtmlImage(group_reader, coll_id, attachment)
+            self.images[image.title] = image
+        # return the info string
+        return info_str
+
     def get_images_from_zotero(self):
         """Tries to find the images in self.missing_images as attachments in the zotero collection
         for this page. If the attachment is found, it then downloads the attachment, resizes it
@@ -309,29 +336,18 @@ class HtmlContent(object):
         if not self.missing_images:
             info_str += "No missing images were found.\n"
             return info_str
-        # Get the reader and coll id from the parents
-        group_reader = self.tabbed_website.group_reader
-        coll_id = self.web_page_tab.coll_id
-        # Get all attachments
-        attachments = group_reader.get_coll_items_by_id(coll_id=coll_id, item_type="attachment")
-        # Creat a dict to store images
-        images = {}
-        # Create the Image objects
-        for attachment in attachments:
-            image = HtmlImage(group_reader, coll_id, attachment)
-            images[image.title] = image
         # For each img, try to find it in attachments
         for missing_img in self.missing_images:
             info_str += "Getting missing image: " + str(missing_img) + ".\n"
             img_zot_title, image_details = missing_img
-            if img_zot_title in images:
-                image = images[img_zot_title]
+            if img_zot_title in self.images:
+                image = self.images[img_zot_title]
                 image.download_image()  # This way we only download the image once
                 for image_detail in image_details:
                     img_loc, width, height = image_detail
                     image.create_image_file(img_loc, width, height)
             else:
-                print "Could not find image: ", img_zot_title
+                info_str += "Could not find image: ", img_zot_title
         return info_str
 
     def replace_pre(self, soup, soup_pre):
@@ -436,20 +452,22 @@ class HtmlImage(object):
             "/items/" + self.zid + "/file?key=" + self.group_reader.zot_key
 
     def download_image(self):
-        """Downloads the image, resizes it, and saves it in the '/img' folder.
+        """Downloads the image to a temporary location.
         """
         # Get the image
-        self.temp_img_filepath = self.group_reader.get_attachment_file(self.zid)
+        if not self.temp_img_filepath:
+            self.temp_img_filepath = self.group_reader.get_attachment_file(self.zid)
 
     def create_image_file(self, img_path_filename, width=None, height=None):
-        """Downloads the image, resizes it, and saves it in the '/img' folder.
+        """Resizes the image, and saves it in the '/img' folder.
         """
-        # Check that the image has been downloaded
-        if not self.temp_img_filepath:
-            self.download_image()
-        # Get the image
-        pil_img = Image.open(self.temp_img_filepath)
+        info_str = "Creating image: " + \
+            img_path_filename + ", " + str(width) + ", " + str(height) + ".\n"
+        # Download the image
+        self.download_image()
         # Resize the image using PIL
+        info_str += "Resizing using PIL.\n"
+        pil_img = Image.open(self.temp_img_filepath)
         img_w, img_h = pil_img.size
         size_1 = (img_w, img_h)
         size_2 = (img_w, img_h)
@@ -461,17 +479,19 @@ class HtmlImage(object):
             size = size_2
         else:
             size = size_1
-        # Save the image
-        if size != (img_w, img_h):
-            try:
+        try:
+            if size != (img_w, img_h):
                 # This might fail if the PIL binary module called _imaging could not be loaded.
                 pil_img_resized = pil_img.resize(size, Image.ANTIALIAS)
                 # Save the image
                 pil_img_resized.save(img_path_filename, quality=100)
-            except:
-                print "Problem with PIL. Images could not be resized."
-        else:
-            pil_img.save(img_path_filename, quality=100)
+            else:
+                pil_img.save(img_path_filename, quality=100)
+        except Exception:
+            info_str += "Problem with PIL. Images could not be resized."
+            info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
+        # Return the info string
+        return info_str
 
 
 class Paper(object):
