@@ -398,6 +398,7 @@ class HtmlContent(object):
         a_tag = toc_soup.new_tag("a")
         a_tag['href'] = "#top"
         a_tag.string = "Contents"
+        h2_tag.append(a_tag)
         toc_soup.append(h2_tag)
         ul_tag = toc_soup.new_tag("ul")
         toc_soup.append(ul_tag)
