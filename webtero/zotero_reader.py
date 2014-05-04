@@ -239,7 +239,7 @@ class HtmlContent(object):
             self.replace_img(soup, soup_img)
             info_str += "Found img tag.\n"
         for soup_pre in soup.find_all('pre'):
-            self.replace_pre(soup, soup_pre)
+            info_str += self.replace_pre(soup, soup_pre)
             info_str += "Found pre tag.\n"
         for i, soup_h in enumerate(soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])):
             soup_h['id'] = "head_" + str(i)
@@ -347,12 +347,13 @@ class HtmlContent(object):
                     img_loc, width, height = image_detail
                     image.create_image_file(img_loc, width, height)
             else:
-                info_str += "Could not find image: ", img_zot_title
+                info_str += "Could not find image: "
         return info_str
 
     def replace_pre(self, soup, soup_pre):
         """Process pre tags in html and execute the instructions.
         """
+        info_str = "Replacing the pre tag.\n"
         # BeautifulSoup 4 code
         result = eval(soup_pre.string)
         group_name = result['group']
@@ -369,8 +370,21 @@ class HtmlContent(object):
         zot_id = self.tabbed_website.group_reader.zot_id
         zot_key = self.tabbed_website.group_reader.zot_key
         data_group_reader = ZoteroGroupReader(zot_id, zot_key)
-        info_str = data_group_reader.initialize_conn_group_name(group_name)
-        items = data_group_reader.get_coll_items_by_name(coll, item_type, tag)
+        info_str += data_group_reader.initialize_conn_group_name(group_name)
+        try:
+            items = data_group_reader.get_coll_items_by_name(coll, item_type, tag)
+        except Exception:
+            info_str += "ERROR: Something went getting items from collection."
+            info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
+            return info_str
+        # Create an html soup
+        soup_pre_rep = self.create_pre_replacement(items, style)
+        soup_pre.replace_with(soup_pre_rep.contents[0])
+        # Return the info str
+        return info_str
+
+
+        """
         # Create an html string
         html_tag = None
         if style == "conference_paper":
@@ -401,7 +415,33 @@ class HtmlContent(object):
             html_tag = html_soup.contents[0]
         else:
             raise Exception()
-        soup_pre.replace_with(html_tag)
+        soup_pre.replace_with(html_tag)"""
+
+    def create_pre_replacement(self, items, style):
+        """Converts this list of items into an html soup
+        """
+        # Create the list of objects
+        mapping = {
+            "conference_paper": ConferencePaper,
+            "journal_paper": JournalPaper,
+            "research_project": ResearchProject
+        }
+        objects = []
+        for i, item in enumerate(items):
+            _class = mapping[style]
+            obj = _class(str(i), item)
+            objects.append(obj)
+        objects.sort(key=lambda paper: obj.year, reverse=True)
+        # Create the soup
+        html_string = ""
+        html_soup = BeautifulSoup(html_string)
+        ul_tag = html_soup.new_tag("ul")
+        ul_tag['class'] = 'publications-list'
+        html_soup.append(ul_tag)
+        for obj in objects:
+            ul_tag.append(obj.get_list_item())
+        # Return the soup
+        return html_soup
 
     def make_toc(self):
         """Creates a toc based on the headings, h1 to h6.
@@ -493,8 +533,11 @@ class HtmlImage(object):
         # Return the info string
         return info_str
 
+# ================================================================================================
+# Items from Zotero
+# ================================================================================================
 
-class Paper(object):
+class Item(object):
     """Any type of paper. Superclass of ConferencePapaer and JournalPaper.
     """
     def __init__(self, uid, data):
@@ -552,8 +595,19 @@ class Paper(object):
         pass
 
 
-class ConferencePaper(Paper):
-    """ Adds proceedings title.
+class ResearchProject(Item):
+    """A research project. The expected Zoter item is a Report.
+    """
+    def __init__(self, uid, data):
+        super(ResearchProject, self).__init__(uid, data)
+        print data
+
+    def get_list_item(self): 
+        return "This is a research rport"
+
+
+class ConferencePaper(Item):
+    """ A conference paper. The expected zotero item type is a Conference Paper.
     """
     def __init__(self, uid, data):
         super(ConferencePaper, self).__init__(uid, data)
@@ -571,8 +625,8 @@ class ConferencePaper(Paper):
         return "<li>" + author_str + "\n" + self.get_abstract_para() + "</li>\n"
 
 
-class JournalPaper(Paper):
-    """Adds journal title and volume/issue.
+class JournalPaper(Item):
+    """A Journal paper. The expected zotero item type is a Journal Article.
     """
     def __init__(self, uid, data):
         super(JournalPaper, self).__init__(uid, data)
