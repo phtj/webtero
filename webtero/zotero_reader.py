@@ -37,6 +37,26 @@ from PIL import Image
 from string import Template
 import traceback
 
+# ================================================================================================
+# A BeautifulSoup helper func
+# ================================================================================================
+
+def bs_create_tag(soup, parent, name, attribs=None, string=None):
+    """A helper func to create a tag.
+    """
+    tag = soup.new_tag(name)
+    if attribs:
+        for key in attribs:
+            tag[key] = attribs[key]
+    if string:
+        tag.string = string
+    parent.append(tag)
+    return tag
+
+# ================================================================================================
+# The main classes to make the website.
+# ================================================================================================
+
 class TabbedWebsite(object):
     """A web page with a list of tabs. The data for the web page is saved in one zotero collection,
     with each sub-collection representing a tab on the web page. For each tab, an instance of
@@ -352,20 +372,30 @@ class HtmlContent(object):
 
     def replace_pre(self, soup, soup_pre):
         """Process pre tags in html and execute the instructions.
+        The instructions are assumed to be in the form of a python dict, with the following key 
+        value pairs:
+        group: the group name
+        coll: the collection name
+        item_type: the type of item that is expected (e.g. ConferencePaper, JournalArticle, etc)
+        style: the style to use to format the result
+        tag: an optional tag to pass to the zotero query as a filter
         """
         info_str = "Replacing the pre tag.\n"
-        # BeautifulSoup 4 code
-        result = eval(soup_pre.string)
+        # Evaluate the pre tag
+        try:
+            result = eval(soup_pre.string)
+        except Exception:
+            info_str += "ERROR: could not evaluate the contents of the pre tag.\n"
+            return info_str
+        # Get the settings
         group_name = result['group']
         coll = result['coll']
         item_type = result['item_type']
         style = result['style']
         # Check if there is a tag
-        tag = ""
+        tag = None
         if result.has_key('tag'):
             tag = result['tag']
-        if not tag:
-            tag = None
         # Create a reader and download data
         zot_id = self.tabbed_website.group_reader.zot_id
         zot_key = self.tabbed_website.group_reader.zot_key
@@ -431,7 +461,7 @@ class HtmlContent(object):
             _class = mapping[style]
             obj = _class(str(i), item)
             objects.append(obj)
-        objects.sort(key=lambda paper: obj.year, reverse=True)
+        objects.sort(key=lambda paper: obj.sort_key, reverse=True)
         # Create the soup
         html_string = ""
         html_soup = BeautifulSoup(html_string)
@@ -544,10 +574,11 @@ class Item(object):
         self.uid = uid
         self.authors = []
         self.title = data[u'title'].encode('utf-8')
-        self.year = data[u'date'].encode('utf-8')[-4:]
+        self.date = data[u'date'].encode('utf-8')[-4:]
         self.pages = data[u'pages'].encode('utf-8')
         self.abstract = data[u'abstractNote'].encode('utf-8')
         self.set_authors(data)
+        self.sort_key = ""
 
     def check_keys(self, dictionary, keys):
         """ Check that the dict contains the list of keys.
@@ -595,15 +626,40 @@ class Item(object):
         pass
 
 
+
 class ResearchProject(Item):
     """A research project. The expected Zoter item is a Report.
     """
     def __init__(self, uid, data):
         super(ResearchProject, self).__init__(uid, data)
-        print data
+        self.place = data[u'place'].encode('utf-8')
+        self.institution = data[u'institution'].encode('utf-8')
+        self.type = data[u'reportType'].encode('utf-8')
+        self.funding = data[u'rights'].encode('utf-8')
+        self.project_number = data[u'reportNumber'].encode('utf-8')
+        self.pi = "--"
+        self.copis = "--"
+        self.collabs = "--"
+        self.duration = "--"
 
     def get_list_item(self): 
-        return "This is a research rport"
+        """ Create a single li item.
+        """
+        soup = BeautifulSoup()
+        li_tag = bs_create_tag(soup, soup, 'li')
+        bs_create_tag(soup, li_tag, 'button', {'class':'toggle', 'target':'#'+self.uid})
+        p_tag = bs_create_tag(soup, li_tag, 'p', {'class':'publication'})
+        bs_create_tag(soup, p_tag, 'phtj-rp-title', attribs=None, string=self.title)
+        bs_create_tag(soup, p_tag, 'phtj-rp-pi', attribs=None, string=self.pi)
+        bs_create_tag(soup, p_tag, 'phtj-rp-copis', attribs=None, string=self.copis)
+        bs_create_tag(soup, p_tag, 'phtj-rp-collabs', attribs=None, string=self.collabs)
+        bs_create_tag(soup, p_tag, 'phtj-rp-duration', attribs=None, string=self.duration)
+        bs_create_tag(soup, p_tag, 'phtj-rp-place', attribs=None, string=self.place)
+        bs_create_tag(soup, p_tag, 'phtj-rp-institution', attribs=None, string=self.institution)
+        bs_create_tag(soup, p_tag, 'phtj-rp-type', attribs=None, string=self.type)
+        bs_create_tag(soup, p_tag, 'phtj-rp-funding', attribs=None, string=self.funding)
+        bs_create_tag(soup, p_tag, 'phtj-rp-abstract', attribs=None, string=self.abstract)
+        return soup
 
 
 class ConferencePaper(Item):
@@ -612,6 +668,7 @@ class ConferencePaper(Item):
     def __init__(self, uid, data):
         super(ConferencePaper, self).__init__(uid, data)
         self.conference = data[u'proceedingsTitle'].encode('utf-8')
+        self.year = self.date[:-4]
 
     def get_list_item(self):  # TODO: change to soup
         author_str = "<button class='toggle' target='#"+self.uid+"'>+</button>"
@@ -631,6 +688,7 @@ class JournalPaper(Item):
     def __init__(self, uid, data):
         super(JournalPaper, self).__init__(uid, data)
         self.journal = data[u'publicationTitle'].encode('utf-8')
+        self.year = self.date[:-4]
         self.volume = data[u'volume'].encode('utf-8')
         self.issue = data[u'issue'].encode('utf-8')
 
