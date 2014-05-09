@@ -1,17 +1,16 @@
-.. Webtero documentation master file, created by
-   sphinx-quickstart on Thu May 08 16:33:04 2014.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
 Welcome to Webtero's documentation!
 ===================================
+
+Webtero is a system for creating websites from data soored in Zotero groups. 
 
 Contents:
 
 .. toctree::
    :maxdepth: 2
 
-
+   page1
+   page2
+   code
 
 Indices and tables
 ==================
