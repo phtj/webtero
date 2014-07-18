@@ -119,7 +119,7 @@ class ZoteroGroup(object):
             return self._get_coll_path(colls_data, parent_id) + '/' + coll_name
 
     def get_collection(self, path):
-        """Returns a collection in this group.
+        """Returns a collection in this group. If the collection does not exist, returns None.
         """
         if path in self.collections:
             return self.collections[path]
@@ -377,7 +377,8 @@ def test_get_data():
     from zotero_auth import ZOT_ID, ZOT_KEY
     group = ZoteroGroup("Patrick Janssen Websites", ZOT_ID, ZOT_KEY)
     print group.initialize_connection()
-    coll = group.get_collection('/Test')
+    coll = group.get_collection('/Dexen')
+    print coll
     items = coll.get_items()
     for item in items:
         print "ITEM", item
@@ -391,11 +392,11 @@ def test_get_data():
 
 
 def test_get_from_zot():
-    items = get_items_from_zotero('Patrick Janssen/Conference Papers', 'dexen')
+    items = test_get_data('Patrick Janssen/Conference Papers', 'dexen')
     #for item in items:
     #    print "ITEM", item
 
 
 if __name__ == "__main__":
     print "Running tests"
-    test_get_from_zot()
+    test_get_data()

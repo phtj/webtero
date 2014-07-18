@@ -43,38 +43,63 @@ from zotero_reader import get_collection
 
 
 class TabbedWebsite(object):
-    """A web page with a list of tabs. The data for the web page is saved in one zotero collection,
-    with each item representing a tab on the web page. For each tab, an instance of
-    WebPageTab is created.
+    """A web page with a list of tabs. The data for the web page is saved in one zotero collection.
+    In the typical case, this will be as folows:
+    - each item (usually a Document) represents a tab on the web page.
+    - the item named 'Head' (usually a Web Page) contains some general html header info.
+    - the hmtl file called 'template.html' is the tempalte to be used for inserting tabs data.
+    - images ???
+    
     """
-    def __init__(self, group_path):
-        self.group_path = group_path
+    def __init__(self, website_path, images_path, template_path, assets_path):
+        self.website_path = website_path
+        self.images_path = images_path
+        self.template_path = template_path
+        self.assets_path = assets_path
         self.html_str = None
 
     def initialize_data(self):
         """Get the data from the zotero database.
         """
-        info_str = "Creating data for the " + self.group_path + " website.\n"
+        info_str = "Creating data for the " + self.website_path + " website.\n"
+
+        # Get the content
         try:
-            coll = get_collection(self.group_path)
-            items = coll.get_items()
-            image_attachments = coll.get_image_attachments()
-            html_attachments = coll.get_html_attachments()
+            coll = get_collection(self.website_path)
+            items = coll.get_items() #various items, e.g. documents
         except Exception:
-            info_str += "ERROR: could not get sub-collections: '" + self.group_path + "'.\n"
+            info_str += "ERROR: could not get sub-collections: '" + self.website_path + "'.\n"
             info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
             return info_str
-        # Check we have the right stuff to make a website
         if not items:
             info_str += "ERROR: could not find any items to create tabs from.\n"
             self.html = "No tabs were found."
             return info_str
-        if not html_attachments:
+
+        # Get the images
+        try:
+            img_coll = get_collection(self.images_path)
+            image_attachments = img_coll.get_image_attachments()
+            images = Images(image_attachments, self.assets_path)
+        except Exception:
+            info_str += "ERROR: could not get sub-collections: '" + self.images_path + "'.\n"
+            info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
+            return info_str
+
+        # Get the template (i.e. the first html in the list of html attachments)
+        try:
+            files_coll = get_collection(self.template_path)
+            html_files = files_coll.get_html_attachments()
+            template_str = html_files[0].get_file_data() # The template is assumed to be the first html file
+        except Exception:
+            info_str += "ERROR: could not get sub-collections: '" + self.template_path + "'.\n"
+            info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
+            return info_str
+        if not html_files:
             info_str += "ERROR: could not find an html template file.\n"
             self.html = "No html template was found."
             return info_str
-        # Get the template (i.e. the first html in the list of html attachments)
-        template_str = html_attachments[0].get_file_data()
+
         # Get the head item and create the tabs from the other items
         head = None
         tabs = []
@@ -82,14 +107,17 @@ class TabbedWebsite(object):
             if item.title == 'Head':
                 head = item
             else:
-                tab = WebTab(item, image_attachments)
+                tab = WebTab(item, images)
                 info_str += tab.initialize_data()
                 tabs.append(tab)
-        if not head or not tabs:
-            info_str += "ERROR: could not get head and/or tabs.\n"
-            self.html = "No html content was found."
+        if not head:
+            info_str += "ERROR: Head was not found.\n"
+            self.html_str = "No Head was found."
+        if not tabs:
+            info_str += "ERROR: no tabs were found.\n"
+            self.html_str = "No html tabs were found."
         else:
-            tabs.sort(key=lambda item: item.sort_key)
+            tabs.sort(key=lambda item: item.sort_key) # sort key is teh Call Number
             self.html_str = self._get_html(template_str, head, tabs)
         return info_str
 
@@ -126,6 +154,14 @@ class TabbedWebsite(object):
             info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
         return info_str
 
+
+class Images(object):
+    """A bunch of images.
+    """
+    def __init__(self, image_attachments, assets_path):
+        # The item that represents this tab
+        self.image_attachments = image_attachments
+        self.assets_path = assets_path
 
 class WebTab(object):
     """A tab on a web page, consisting of html and images. In the zotero collection, the html is
@@ -328,12 +364,13 @@ class HtmlImage(object):
         info_str = "    Creating data for images.\n"
         soup = BeautifulSoup(self.tag)
         soup_img = soup.find('img')
-        print str(soup_img)
+        #print str(soup_img)
         src = soup_img.get('src')
         width = soup_img.get('width')
         height = soup_img.get('height')
-        print "IMAGE", self.tag, src, width, height
+        #print "IMAGE", self.tag, src, width, height
 
+        # NOT IMPLEMENTED
 
         info_str = "    Creating data for images.\n"
         return info_str
@@ -355,9 +392,13 @@ def test_tabs():
     from zotero_auth import ZOT_ID, ZOT_KEY
 
     CURR_DIR = os.path.dirname(os.path.abspath(__file__))
-    IMG_DIR = CURR_DIR + "/test/index.html"
+    ASSETS_DIR = CURR_DIR + "/test/index.html"
 
-    twp = TabbedWebsite("Patrick Janssen Websites/Dexen") 
+    WEBSITE_COLL = "Patrick Janssen Websites/Dexen"
+    IMGS_COLL = "Patrick Janssen Websites/_Images"
+    FILES_COLL = "Patrick Janssen Websites/_Files"
+
+    twp = TabbedWebsite(WEBSITE_COLL, IMGS_COLL, FILES_COLL, ASSETS_DIR) 
     print twp.initialize_data()
     print twp.create_html_file(CURR_DIR + "/test/index.html")
     print "Finished..."
