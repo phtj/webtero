@@ -237,6 +237,12 @@ class ZoteroItem(object):
         for item_data in items_data:
             item = ZoteroAttachment(self.group, item_data)
             self.attachments.append(item)
+    
+    def get_attribs(self):
+        """Return a list of teh attributes in this object.
+        """
+        return dir()
+
 
     def has_tag(self, tag):
         """Check is this item has a specified tag.

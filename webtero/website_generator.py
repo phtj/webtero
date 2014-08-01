@@ -49,76 +49,82 @@ class TabbedWebsite(object):
     - the item named 'Head' (usually a Web Page) contains some general html header info.
     - the hmtl file called 'template.html' is the tempalte to be used for inserting tabs data.
     - images ???
+
+    The parameters are as follows:
+    website_coll: The zotero path to the collection that holds all the data.
+    template_coll: The zotero path to the collcetion hat holds the template file (template.html).
+    images_coll: The zotero path to the collection that holds the images.
+    website_filepath: The location on disk where to save html file (including the filename).
+    images_dirpath: The location on disk where to save downloaded images.
+    images_url: The url to use for images.
     
     """
-    def __init__(self, website_path, images_path, template_path, assets_path):
-        self.website_path = website_path
-        self.images_path = images_path
-        self.template_path = template_path
-        self.assets_path = assets_path
-        self.html_str = None
+    def __init__(self, website_coll, template_coll, images_coll):
+        #Zotero collections
+        self.website_coll = website_coll
+        self.template_coll = template_coll
+        self.images_coll = images_coll
+        #The data
+        self.template_str = None
+        self.head = None
+        self.tabs = []
+        self.zot_images = None
 
     def initialize_data(self):
         """Get the data from the zotero database.
         """
-        info_str = "Creating data for the " + self.website_path + " website.\n"
+        info_str = "Creating data for the " + self.website_coll + " website.\n"
 
         # Get the content
         try:
-            coll = get_collection(self.website_path)
+            coll = get_collection(self.website_coll)
             items = coll.get_items() #various items, e.g. documents
         except Exception:
-            info_str += "ERROR: could not get sub-collections: '" + self.website_path + "'.\n"
+            info_str += "ERROR: could not get sub-collections: '" + self.website_coll + "'.\n"
             info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
             return info_str
         if not items:
             info_str += "ERROR: could not find any items to create tabs from.\n"
-            self.html = "No tabs were found."
             return info_str
 
         # Get the images
         try:
-            img_coll = get_collection(self.images_path)
-            image_attachments = img_coll.get_image_attachments()
-            images = Images(image_attachments, self.assets_path)
+            img_coll = get_collection(self.images_coll)
+            self.zot_images = img_coll.get_image_attachments()
+            
         except Exception:
-            info_str += "ERROR: could not get sub-collections: '" + self.images_path + "'.\n"
+            info_str += "ERROR: could not get sub-collections: '" + self.images_coll + "'.\n"
             info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
             return info_str
 
         # Get the template (i.e. the first html in the list of html attachments)
         try:
-            files_coll = get_collection(self.template_path)
+            files_coll = get_collection(self.template_coll)
             html_files = files_coll.get_html_attachments()
-            template_str = html_files[0].get_file_data() # The template is assumed to be the first html file
+            self.template_str = html_files[0].get_file_data() # The template is assumed to be the first html file
         except Exception:
-            info_str += "ERROR: could not get sub-collections: '" + self.template_path + "'.\n"
+            info_str += "ERROR: could not get sub-collections: '" + self.template_coll + "'.\n"
             info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
             return info_str
         if not html_files:
             info_str += "ERROR: could not find an html template file.\n"
-            self.html = "No html template was found."
             return info_str
 
         # Get the head item and create the tabs from the other items
-        head = None
-        tabs = []
         for item in items:
             if item.title == 'Head':
-                head = item
+                self.head = item
             else:
-                tab = WebTab(item, images)
+                tab = WebTab(item)
                 info_str += tab.initialize_data()
-                tabs.append(tab)
+                self.tabs.append(tab)
         if not head:
             info_str += "ERROR: Head was not found.\n"
             self.html_str = "No Head was found."
         if not tabs:
             info_str += "ERROR: no tabs were found.\n"
             self.html_str = "No html tabs were found."
-        else:
-            tabs.sort(key=lambda item: item.sort_key) # sort key is teh Call Number
-            self.html_str = self._get_html(template_str, head, tabs)
+
         return info_str
 
     def _get_buttons_html(self, tabs):
@@ -131,46 +137,106 @@ class TabbedWebsite(object):
         """
         return "".join([tab.get_tab_content() for tab in tabs])
 
-    def _get_html(self, template_str, head, tabs):
+    def _get_html(self, images_url):
         """Returns the full html for a web page with tabs. The template is a jinja2 template that 
         is attached to the item called Head (should be only one). The html is encoded as utf-8.
         """
+
+        
+
+        tabs.sort(key=lambda item: item.sort_key) # sort key is teh Call Number
+        self.html_str = self._get_html(template_str, head, tabs)
+
+        # Check the image exists
+        if not self.images.contains_image(src):
+            self.new_tag = "Image cannot be found: " + src
+            info_str += "    Creating data for images.\n"
+            return info_str
+
+
         tabs_buttons = self._get_buttons_html(tabs).decode('utf-8')
         tabs_content = self._get_content_html(tabs).decode('utf-8')
         jinja_template = jinja2.Template(template_str.decode('utf-8'))
         return jinja_template.render(
             head=head, tabs_buttons=tabs_buttons, tabs_content=tabs_content).encode('utf-8')
+    
+    def _create_image_files(self, images_dirpath):
+        """Create the image files for the website.
+        """
+        # Get the names of the images in the web page
+        req_image_tags = []
+        for tab in self.tabs:
+            for image_tag in tab.html.image_tags:
+                req_image_tags.append(image_tag)
 
-    def create_html_file(self, filename):
+        # Create the image object and 
+        images = Images(req_image_tags, images_dirpath, self.zot_images)
+        images._create_image_files()
+
+    def _create_html_file(self, website_filepath, images_url):
         """Create an html file. Filename includes the full path to the file. Any folders must
         exist. The html is encoded as utf-8.
         """
-        info_str = "Writing html file to disk: " + filename + "\n"
+        info_str = "Writing html file to disk: " + self.website_path + "\n"
         try:
-            with open(filename, "w") as html_file:
-                html_file.write(self.html_str)
+            with open(self.website_path, "w") as html_file:
+                html_file.write(self._get_html(images_url))
         except Exception:
             info_str += "ERROR: could not write html file to disk. Maybe the path is wrong.\n"
             info_str += "EXCEPTION: \n" + traceback.format_exc() + "\n"
         return info_str
 
+    def create_website(self, website_filepath, images_url, images_dirpath):
+        """Create all the files for the website.
+        """
+        self._create_image_files(images_dirpath)
+        self._create_html_file(website_filepath, images_url)
+
 
 class Images(object):
-    """A bunch of images.
+    """A class for dealing iwth images. 
     """
-    def __init__(self, image_attachments, assets_path):
+    def __init__(self, image_tags, images_dirpath, zot_images):
         # The item that represents this tab
-        self.image_attachments = image_attachments
-        self.assets_path = assets_path
+        self.image_tags = image_tags
+        self.images_dirpath = images_dirpath
+        self.zot_images = zot_images
+
+    def contains_image(self, image_name):
+        """Returns true if the image_name is in the list of attachments.
+        """
+        print self.zot_images[0].__dict__
+        return image_name in [att.filename for att in self.zot_images if att.is_image()]
+
+    def get_image(self, image_name):
+        pass
+
+    def resize_image(self, original_name, resized_name, width, height):
+        """Resize the image according to the width and height.
+        """
+        original_path = os.path.join(self.dirpath, original_name)
+        resized_path = os.path.join(self.dirpath, resized_name)
+        if not os.path.isfile(resized_path):
+            print "Create the file: ", resized_path
+
+    def _create_image_files():
+        """Basically I need to check if 
+        - for each req image, does it exist already
+        - if not, is it in zotero
+        - if yes, resize it and save it to the images folder.
+        pass
+        
+
+
+
 
 class WebTab(object):
     """A tab on a web page, consisting of html and images. In the zotero collection, the html is
     saved in notes, and images are saved as attachments.
     """
-    def __init__(self, item, images):
+    def __init__(self, item):
         # The item that represents this tab
         self.item = item
-        self.images = images
         self.name = item.title
         self.sort_key = None
         self.html_id = None
@@ -179,7 +245,7 @@ class WebTab(object):
     def initialize_data(self):
         """Add items based on data from zotero. Currently only three types of items are considered
         as being part of the web page: imagea are assumed to be attachments and artworks, and
-        html is assumed to be standalone notes.
+        html is assumed to be an html attachment.
         """
         info_str = "  Creating data for '" + self.name + "' tab.\n"
         try:
@@ -195,14 +261,14 @@ class WebTab(object):
                 info_str += "  No html content was found."
             else:
                 if len(htmls) == 1:
-                    self.html = HtmlContent(htmls[0], self.images)
+                    self.html = HtmlContent(htmls[0])
                 elif len(htmls) > 1:
                     for html in htmls:
                         if html.has_tag('html-content'):
-                            self.html = HtmlContent(html, self.images)
+                            self.html = HtmlContent(html)
                             break
                     if not self.html:
-                        self.html = HtmlContent(htmls[0], self.images)
+                        self.html = HtmlContent(htmls[0])
                 info_str += self.html.initialize_data()
         except Exception:
             info_str += "  ERROR: Failed to get data from the zotero database.\n"
@@ -247,15 +313,14 @@ class HtmlContent(object):
     The list of missing images looks something like this:
     [(img_zot_title, (img_loc, width, height), (img_loc, width, height)), ...]
     """
-    def __init__(self, html, images):
+    def __init__(self, html):
         # The parent objects
         self.html = html
-        self.images = images
         # The data
         self.html_str = None
         self.script_str = None
         self.toc_str = None
-        self.missing_images = []
+        self.image_tags = []
 
     def initialize_data(self):
         """Get images and replace <img> and <pre> tags.
@@ -300,9 +365,14 @@ class HtmlContent(object):
         # Create soup
         soup = BeautifulSoup(self.html_str)
         for old_img_soup in soup.find_all('img'):
-            image = HtmlImage(str(old_img_soup), self.images)
-            image.initialize_data()
-            new_img = image.get_html()
+
+            # Save the image tags
+            image_tag = HtmlImageTag(str(old_img_soup))
+            image_tag.initialize_data()
+            self.image_tags.append(image_tag)
+
+            # Update the html
+            new_img = image_tag.get_html()
             new_img_soup = BeautifulSoup(new_img).contents[0]
             old_img_soup.replace_with(new_img_soup)
         self.html_str = str(soup)
@@ -348,37 +418,56 @@ class HtmlContent(object):
         self.toc_str = str(toc_soup)
 
 
-class HtmlImage(object):
-    """An image in an html page
+class HtmlImageTag(object):
+    """An image in an html page. 
     """
-    def __init__(self, tag, images):
+    def __init__(self, tag):
         # The parent objects
-        self.tag = tag
-        self.images = images
+        self.original_tag = tag
+        self.new_tag = None
         # The data
         self.html_str = None
 
     def initialize_data(self):
-        """Init the image data.
+        """Init the image data. First, check if the image exists in the images folder. If not, then 
+        create the image.
         """
         info_str = "    Creating data for images.\n"
-        soup = BeautifulSoup(self.tag)
+        soup = BeautifulSoup(self.original_tag)
         soup_img = soup.find('img')
-        #print str(soup_img)
         src = soup_img.get('src')
+        # Create the image urls
         width = soup_img.get('width')
         height = soup_img.get('height')
-        #print "IMAGE", self.tag, src, width, height
-
-        # NOT IMPLEMENTED
-
-        info_str = "    Creating data for images.\n"
+        print "IMAGE", self.original_tag, src, width, height
+        resized_src = src.split('.')[0]
+        if width:
+            resized_src += '_w' + str(width)
+        if height:
+            resized_src += '_h' + str(height)
+        resized_src += '.' + src.split('.')[0]
+        img_original_url = self.images.url + src #TODO: remove img
+        img_resized_url = self.images.url + resized_src #TODO: remove img
+        # Create the new image tag
+        a_img_soup = BeautifulSoup()
+        a_tag = a_img_soup.new_tag('a')
+        a_tag['href'] = img_original_url
+        img_tag = a_img_soup.new_tag('img')
+        img_tag['src'] = img_resized_url
+        a_img_soup.append(a_tag)
+        a_tag.append(img_tag)
+        self.new_tag = str(a_img_soup)
+        # Create the resized image
+        self.images.resize_image(src, resized_src, width, height)
+        # Return
+        info_str += "    Finished creating data for images.\n"
         return info_str
 
+    #def _check_if_img_exists(self, path):
     def get_html(self):
         """Get the html for this image tag.
         """
-        return "<p>This is a test.</p>"
+        return self.new_tag
 
 # ================================================================================================
 # Testing
@@ -392,15 +481,18 @@ def test_tabs():
     from zotero_auth import ZOT_ID, ZOT_KEY
 
     CURR_DIR = os.path.dirname(os.path.abspath(__file__))
-    ASSETS_DIR = CURR_DIR + "/test/index.html"
 
     WEBSITE_COLL = "Patrick Janssen Websites/Dexen"
-    IMGS_COLL = "Patrick Janssen Websites/_Images"
     FILES_COLL = "Patrick Janssen Websites/_Files"
+    IMGS_COLL = "Patrick Janssen Websites/_Images"
 
-    twp = TabbedWebsite(WEBSITE_COLL, IMGS_COLL, FILES_COLL, ASSETS_DIR) 
+    WEBSITE_PATH = CURR_DIR + "/test/index.html"
+    IMGS_PATH = CURR_DIR + "/img/"
+    IMGS_URL = "/img/"
+
+    twp = TabbedWebsite(WEBSITE_COLL, FILES_COLL, IMGS_COLL, WEBSITE_PATH, IMGS_PATH, IMGS_URL) 
     print twp.initialize_data()
-    print twp.create_html_file(CURR_DIR + "/test/index.html")
+    print twp.create_html_file()
     print "Finished..."
 
 
