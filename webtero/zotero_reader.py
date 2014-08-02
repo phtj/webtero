@@ -26,6 +26,7 @@ from pyzotero import zotero
 import urllib
 import os
 import traceback
+import json
 
 # ================================================================================================
 # Main Reader
@@ -215,6 +216,7 @@ class ZoteroItem(object):
         self.group = group
         self.attachments = None
         self.tags = []
+
         # Extract items out of the data
         for key, value in data.iteritems():
             if key == u'tags':
@@ -222,12 +224,35 @@ class ZoteroItem(object):
                     self.tags.append(i[u'tag'].encode('utf-8'))
             elif key == u'key':
                 self.uid = value.encode('utf-8')
-            elif type(value) == unicode:
-                if value != u'':
-                    setattr(self, key.encode('utf-8'), value.encode('utf-8'))
+            elif isinstance(value, basestring):
+                setattr(self, key.encode('utf-8'), value.encode('utf-8'))
+
+        self.creators = "Dummy"
+
+        """
             else:
-                if value:
-                    setattr(self, key.encode('utf-8'), value)
+                if isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, list):
+                            for value2 in item:
+                                value2.encode('utf-8')
+                        elif isinstance(item, dict):
+                            for key2, value2 in item.iteritems():
+                                key2.encode('utf-8')
+                                value2.encode('utf-8')
+                        else:
+                            item.encode('utf-8')
+                        self.key = value
+                else:
+                    value = str(value)
+                    setattr(self, key.encode('utf-8'), value.encode('utf-8'))"""
+
+            #elif type(value) == unicode:
+            #    if value != u'':
+            #        setattr(self, key.encode('utf-8'), value.encode('utf-8'))
+            #else:
+            #    if value:
+            #        setattr(self, key.encode('utf-8'), value)
 
     def initialize_data(self):
         """Get the data from zotero.
@@ -348,15 +373,19 @@ class ZoteroAttachment(ZoteroItem):
                 raise Exception()
         return self.filepath
 
-    def get_file_data(self):
+    def get_file_data(self, binary=False):
         path = self.get_file()
-        with open(path, 'r') as attached_file:
+        if binary:
+            mode = 'rb'
+        else:
+            mode = 'r'
+        with open(path, mode) as attached_file:
             data = attached_file.read()
         return data
 
 
 # ================================================================================================
-# Utility Function to get items froma collection
+# Utility Function to get items from a collection
 # ================================================================================================
 
 def get_collection(group_path):
@@ -376,33 +405,14 @@ def get_collection(group_path):
 # Testing
 # ================================================================================================
 
-def test_get_data():
-    """Simple test for getting data from zotero.
-    """
-    print "Starting..."
-    from zotero_auth import ZOT_ID, ZOT_KEY
-    group = ZoteroGroup("Patrick Janssen Websites", ZOT_ID, ZOT_KEY)
-    print group.initialize_connection()
-    coll = group.get_collection('/Dexen')
-    print coll
+
+def test1():
+    coll = get_collection('Patrick Janssen/Conference Papers')
     items = coll.get_items()
     for item in items:
         print "ITEM", item
-        attachments = item.get_attachments()
-        for attachment in attachments:
-            print "ATTACH", attachment
-            if attachment.is_html():
-                print "======================================"
-                print attachment.get_file_data()
-                print "======================================"
-
-
-def test_get_from_zot():
-    items = test_get_data('Patrick Janssen/Conference Papers', 'dexen')
-    #for item in items:
-    #    print "ITEM", item
 
 
 if __name__ == "__main__":
     print "Running tests"
-    test_get_data()
+    test1()
