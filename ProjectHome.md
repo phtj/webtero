@@ -1,0 +1,1 @@
+Uses zotero as a database, and then generates both the website structure and the website content based on the data in Zotero.
